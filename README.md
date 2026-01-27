@@ -34,6 +34,7 @@
 - [データモデル](docs/data-model.md)
 - [DDL草案](docs/ddl.md)
 - [API概要](docs/api-overview.md)
+- [API詳細設計](docs/api-detail.md)
 - [運用ルール](docs/operations.md)
 
 ## 開発の進め方（MVP順）
