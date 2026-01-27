@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:16
+    container_name: accounting-app
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: accounting-app
+      TZ: Asia/Tokyo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # 初期SQLを流したい場合（任意）
+      # - ./db/init:/docker-entrypoint-initdb.d:ro
+
+volumes:
+  pgdata:
