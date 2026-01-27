@@ -32,6 +32,7 @@
 - [要件・スコープ](docs/requirements.md)
 - [アーキテクチャ](docs/architecture.md)
 - [データモデル](docs/data-model.md)
+- [DDL草案](docs/ddl.md)
 - [API概要](docs/api-overview.md)
 - [運用ルール](docs/operations.md)
 
