@@ -3,7 +3,7 @@
 ## 目的
 
 - akmic合同会社の会計処理をMFクラウドから段階的に自社管理へ移行する。
-- Supabase PostgreSQLを会計データの正本、Supabase Storageを証憑本体の保存先とする。
+- 会計専用Supabaseプロジェクトを作成し、そのPostgreSQLを会計データの正本、Storageを証憑本体の保存先とする。
 - Google Sheetsは確認・照合・集計用とし、正本にはしない。
 - 仕訳、証憑、銀行明細、カード明細、取込元ファイルまで追跡できるようにする。
 - 監査性・整合性を担保し、確定後の仕訳は修正仕訳で追跡する。
@@ -83,6 +83,8 @@
 
 ## 非機能要件
 
+- 会計用Supabaseは他用途（特にスロット分析）と別プロジェクトにする
+- Database、Storage、Auth、APIキー、接続情報を他プロジェクトと共有しない
 - 会計データと証憑は原則private
 - Supabaseのaccounting schemaはData APIへ不用意に公開しない
 - 公開クライアントにservice role / secret keyを置かない
