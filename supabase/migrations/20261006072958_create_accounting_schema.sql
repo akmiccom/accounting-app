@@ -261,29 +261,56 @@ create or replace function accounting.recalculate_journal_totals()
 returns trigger
 language plpgsql
 set search_path = ''
-as $$
+as $
 declare
-  v_journal_id uuid := coalesce(new.journal_id, old.journal_id);
+  v_journal_id uuid;
 begin
-  update accounting.journals j
-     set total_debit = coalesce((
-           select sum(l.amount)
-             from accounting.journal_lines l
-            where l.journal_id = v_journal_id
-              and l.side = 'debit'
-         ), 0),
-         total_credit = coalesce((
-           select sum(l.amount)
-             from accounting.journal_lines l
-            where l.journal_id = v_journal_id
-              and l.side = 'credit'
-         ), 0),
-         updated_at = now()
-   where j.id = v_journal_id;
+  -- Recalculate the destination/current journal.
+  if tg_op <> 'DELETE' then
+    v_journal_id := new.journal_id;
+
+    update accounting.journals j
+       set total_debit = coalesce((
+             select sum(l.amount)
+               from accounting.journal_lines l
+              where l.journal_id = v_journal_id
+                and l.side = 'debit'
+           ), 0),
+           total_credit = coalesce((
+             select sum(l.amount)
+               from accounting.journal_lines l
+              where l.journal_id = v_journal_id
+                and l.side = 'credit'
+           ), 0),
+           updated_at = now()
+     where j.id = v_journal_id;
+  end if;
+
+  -- If a line was deleted or moved, also recalculate the old journal.
+  if tg_op <> 'INSERT'
+     and (tg_op = 'DELETE' or old.journal_id is distinct from new.journal_id) then
+    v_journal_id := old.journal_id;
+
+    update accounting.journals j
+       set total_debit = coalesce((
+             select sum(l.amount)
+               from accounting.journal_lines l
+              where l.journal_id = v_journal_id
+                and l.side = 'debit'
+           ), 0),
+           total_credit = coalesce((
+             select sum(l.amount)
+               from accounting.journal_lines l
+              where l.journal_id = v_journal_id
+                and l.side = 'credit'
+           ), 0),
+           updated_at = now()
+     where j.id = v_journal_id;
+  end if;
 
   return null;
 end;
-$$;
+$;
 
 create trigger journal_lines_recalculate_totals
 after insert or update or delete on accounting.journal_lines
@@ -311,9 +338,13 @@ begin
     raise exception 'Finalized journals are immutable';
   end if;
 
-  return coalesce(new, old);
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+
+  return new;
 end;
-$$;
+$;
 
 create trigger journals_protect_finalized
 before update or delete on accounting.journals
@@ -338,9 +369,13 @@ begin
     raise exception 'Lines of finalized journals are immutable';
   end if;
 
-  return coalesce(new, old);
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+
+  return new;
 end;
-$$;
+$;
 
 create trigger journal_lines_protect_finalized
 before insert or update or delete on accounting.journal_lines
@@ -357,6 +392,13 @@ declare
   v_debit numeric(14,2);
   v_credit numeric(14,2);
 begin
+  if tg_op = 'INSERT' then
+    if new.status <> 'draft' then
+      raise exception 'Journals must be inserted as draft and posted after lines are added';
+    end if;
+    return new;
+  end if;
+
   if new.status = 'posted' and old.status = 'draft' then
     select count(*),
            coalesce(sum(amount) filter (where side = 'debit'), 0),
@@ -379,7 +421,7 @@ end;
 $$;
 
 create trigger journals_validate_posting
-before update of status on accounting.journals
+before insert or update of status on accounting.journals
 for each row execute function accounting.validate_journal_posting();
 
 -- Evidence metadata and imported originals are append-only.
