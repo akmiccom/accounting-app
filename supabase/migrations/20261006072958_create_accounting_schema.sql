@@ -344,7 +344,7 @@ begin
 
   return new;
 end;
-$;
+$$;
 
 create trigger journals_protect_finalized
 before update or delete on accounting.journals
@@ -375,7 +375,7 @@ begin
 
   return new;
 end;
-$;
+$$;
 
 create trigger journal_lines_protect_finalized
 before insert or update or delete on accounting.journal_lines
