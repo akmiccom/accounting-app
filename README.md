@@ -6,7 +6,7 @@ akmic合同会社の会計処理を、Money Forward クラウド依存から段�
 
 - 仕訳・証憑・銀行明細・カード明細を追跡可能な形で管理する
 - 確定仕訳は直接書き換えず、修正仕訳で履歴を残す
-- Supabase PostgreSQL を会計データの正本、Supabase Storage を証憑本体の保存先とする
+- 会計専用Supabaseプロジェクトを作成し、そのPostgreSQLを会計データの正本、Storageを証憑本体の保存先とする
 - Google Sheets は確認・照合・集計用の画面として使い、正本にはしない
 - MFクラウドの2025年度データを使って自前集計を検証し、決算・申告・最終バックアップ後に解約できる状態を作る
 - 電子帳簿保存法の真実性・可視性・検索性を意識した証憑管理を行う
@@ -28,6 +28,13 @@ akmic合同会社の会計処理を、Money Forward クラウド依存から段�
 - Google Sheetsで未照合・仕訳候補・月次集計・帳票を確認する
 - 自動仕訳は候補生成までとし、当面は人が確認してpostedにする
 
+## Supabaseプロジェクト方針
+
+- 会計用は専用Supabaseプロジェクトとして作成する
+- スロット分析用SupabaseプロジェクトとはDB・Storage・Auth・APIキーを完全分離する
+- 会計プロジェクト内でも `accounting` schema とprivate Storage bucketで会計データを整理する
+- 会計プロジェクトのproject ref、URL、APIキー、接続情報はリポジトリへコミットしない
+
 ## 基本構成
 
 ```text
@@ -37,7 +44,7 @@ GMOあおぞらネット銀行 CSV
 receipt-processor / 証憑入力
             |
             v
-Supabase
+会計専用 Supabase Project
 ├─ accounting schema
 │  ├─ companies / fiscal_years
 │  ├─ accounts / sub_accounts
