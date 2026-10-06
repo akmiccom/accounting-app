@@ -290,8 +290,25 @@ begin
   end if;
 
   -- If a line was deleted or moved, also recalculate the old journal.
-  if tg_op <> 'INSERT'
-     and (tg_op = 'DELETE' or old.journal_id is distinct from new.journal_id) then
+  if tg_op = 'DELETE' then
+    v_journal_id := old.journal_id;
+
+    update accounting.journals j
+       set total_debit = coalesce((
+             select sum(l.amount)
+               from accounting.journal_lines l
+              where l.journal_id = v_journal_id
+                and l.side = 'debit'
+           ), 0),
+           total_credit = coalesce((
+             select sum(l.amount)
+               from accounting.journal_lines l
+              where l.journal_id = v_journal_id
+                and l.side = 'credit'
+           ), 0),
+           updated_at = now()
+     where j.id = v_journal_id;
+  elsif tg_op = 'UPDATE' and old.journal_id is distinct from new.journal_id then
     v_journal_id := old.journal_id;
 
     update accounting.journals j
@@ -360,16 +377,28 @@ language plpgsql
 set search_path = ''
 as $$
 declare
-  v_journal_id uuid := coalesce(new.journal_id, old.journal_id);
   v_status text;
 begin
-  select j.status
-    into v_status
-    from accounting.journals j
-   where j.id = v_journal_id;
+  if tg_op in ('DELETE', 'UPDATE') then
+    select j.status
+      into v_status
+      from accounting.journals j
+     where j.id = old.journal_id;
 
-  if v_status in ('posted', 'reversed') then
-    raise exception 'Lines of finalized journals are immutable';
+    if v_status in ('posted', 'reversed') then
+      raise exception 'Lines of finalized journals are immutable';
+    end if;
+  end if;
+
+  if tg_op in ('INSERT', 'UPDATE') then
+    select j.status
+      into v_status
+      from accounting.journals j
+     where j.id = new.journal_id;
+
+    if v_status in ('posted', 'reversed') then
+      raise exception 'Lines of finalized journals are immutable';
+    end if;
   end if;
 
   if tg_op = 'DELETE' then
