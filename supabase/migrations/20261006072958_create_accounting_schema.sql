@@ -261,7 +261,7 @@ create or replace function accounting.recalculate_journal_totals()
 returns trigger
 language plpgsql
 set search_path = ''
-as $
+as $$
 declare
   v_journal_id uuid;
 begin
@@ -310,7 +310,7 @@ begin
 
   return null;
 end;
-$;
+$$;
 
 create trigger journal_lines_recalculate_totals
 after insert or update or delete on accounting.journal_lines
