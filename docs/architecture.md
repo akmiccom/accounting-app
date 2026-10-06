@@ -2,11 +2,18 @@
 
 ## 基本方針
 
-会計データの正本と証憑本体をSupabaseに集約する。Google Sheetsは確認・照合・集計用のビューとして扱う。
+会計データの正本と証憑本体を会計専用Supabaseプロジェクトに集約する。スロット分析等の他用途のSupabaseプロジェクトとは完全分離する。Google Sheetsは確認・照合・集計用のビューとして扱う。
+
+## プロジェクト分離方針
+
+- 会計用Supabaseは専用プロジェクトを新規作成する。
+- スロット分析用SupabaseとはDatabase、Storage、Auth、APIキー、接続情報を共有しない。
+- 障害・誤操作・権限変更・将来の解約/移管を会計単位で独立させる。
+- project refやsecret/service role keyはGitへコミットしない。
 
 ## 構成
 
-- Database: Supabase PostgreSQL
+- Database: 会計専用 Supabase PostgreSQL
 - 証憑: Supabase Storage
 - Database schema: `accounting`（原則private）
 - Storage bucket:
