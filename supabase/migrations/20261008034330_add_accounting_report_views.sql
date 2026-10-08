@@ -1,0 +1,1 @@
+-- Applied remotely via ChatGPT Supabase connector. Schema captured by subsequent db pull.
