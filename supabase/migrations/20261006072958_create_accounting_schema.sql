@@ -1,6 +1,3 @@
--- Canonical DDL mirror of the initial Supabase accounting migration.
--- Keep this file aligned with supabase/migrations/20261006072958_create_accounting_schema.sql.
-
 -- Initial accounting schema for Supabase.
 -- This migration intentionally keeps the accounting schema private from anon/authenticated.
 -- Application access is server-side until an explicit end-user authorization model is added.

@@ -1,99 +1,39 @@
-# DDL草案（PostgreSQL）
+# DDL草案（Supabase PostgreSQL）
 
-> 方針: 監査性と整合性を重視しつつ、MVPで必要な制約を最低限入れる。
-> 借方=貸方は「posted確定時」に検証する想定で、DB側では total_debit/total_credit を保持しチェック制約で担保する案。
+実体は [ddl.sql](ddl.sql) を参照する。
 
-```sql
--- UUID生成用
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+## 方針
 
--- 会社
-CREATE TABLE companies (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+- 会計データは `accounting` schema に分離する。
+- 会計・証憑は機密データのため、初期段階では `anon` / `authenticated` から直接アクセスさせない。
+- Web UIから直接Data APIを使う段階になった場合は、公開範囲とRLS policyを改めて設計する。
+- Storageは `accounting-receipts` と `accounting-imports` のprivate bucketを前提とする。
+- Storage objectの作成・削除・移動はStorage API経由で行い、`storage` schemaを直接更新しない。
 
--- 会計年度/期間
-CREATE TABLE fiscal_years (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  company_id UUID NOT NULL REFERENCES companies(id),
-  name TEXT NOT NULL,
-  start_date DATE NOT NULL,
-  end_date DATE NOT NULL,
-  is_closed BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT fiscal_years_date_check CHECK (start_date <= end_date)
-);
+## 既存MVPからの主な追加
 
--- 勘定科目
-CREATE TABLE accounts (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  company_id UUID NOT NULL REFERENCES companies(id),
-  code TEXT NOT NULL,
-  name TEXT NOT NULL,
-  category TEXT NOT NULL,
-  is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT accounts_code_unique UNIQUE (company_id, code),
-  CONSTRAINT accounts_category_check CHECK (category IN ('asset', 'liability', 'equity', 'revenue', 'expense'))
-);
+- `sub_accounts`
+- `receipts`
+- `journal_receipts`
+- `import_files`
+- `bank_transactions`
+- `card_transactions`
 
--- 仕訳ヘッダ
-CREATE TABLE journals (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  company_id UUID NOT NULL REFERENCES companies(id),
-  fiscal_year_id UUID NOT NULL REFERENCES fiscal_years(id),
-  entry_date DATE NOT NULL,
-  voucher_no TEXT NOT NULL,
-  description TEXT,
-  status TEXT NOT NULL DEFAULT 'draft',
-  total_debit NUMERIC(14,2) NOT NULL DEFAULT 0,
-  total_credit NUMERIC(14,2) NOT NULL DEFAULT 0,
-  created_by UUID NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT journals_voucher_unique UNIQUE (company_id, voucher_no),
-  CONSTRAINT journals_status_check CHECK (status IN ('draft', 'posted', 'reversed')),
-  CONSTRAINT journals_totals_check CHECK (total_debit = total_credit)
-);
+## 監査設計
 
--- 仕訳明細
-CREATE TABLE journal_lines (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  journal_id UUID NOT NULL REFERENCES journals(id) ON DELETE CASCADE,
-  account_id UUID NOT NULL REFERENCES accounts(id),
-  side TEXT NOT NULL,
-  amount NUMERIC(14,2) NOT NULL,
-  memo TEXT,
-  department TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT journal_lines_side_check CHECK (side IN ('debit', 'credit')),
-  CONSTRAINT journal_lines_amount_check CHECK (amount > 0)
-);
+- `journals.status = posted` 以降は直接更新・削除しない。
+- 修正は反対仕訳/調整仕訳を追加する。
+- `reversal_of_journal_id` で修正関係を追跡する。
+- 証憑差替えは同一Storage pathの上書きではなく、新規receiptを登録し `supersedes_receipt_id` で関連付ける。
+- 証憑・インポート原本にはSHA-256を記録する。
 
--- 監査ログ
-CREATE TABLE audit_logs (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  company_id UUID NOT NULL REFERENCES companies(id),
-  actor_id UUID NOT NULL,
-  action TEXT NOT NULL,
-  target_type TEXT NOT NULL,
-  target_id UUID NOT NULL,
-  before_data JSONB,
-  after_data JSONB,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT audit_logs_action_check CHECK (action IN ('create', 'update', 'post', 'reverse', 'import'))
-);
+## MF移行
 
--- インデックス例
-CREATE INDEX idx_journals_company_date ON journals (company_id, entry_date);
-CREATE INDEX idx_journal_lines_journal ON journal_lines (journal_id);
-CREATE INDEX idx_journal_lines_account ON journal_lines (account_id);
-```
+MFクラウド由来のデータは、`source_system = 'mf_cloud'` とし、MF側のjournal IDを `source_record_id` に保存する。
+必要な移行検証情報は `source_data` に保持するが、恒久運用で不要な巨大JSONを無制限に格納しない。
 
-## 補足
-- `journals.total_debit/total_credit` は、API側で `journal_lines` から集計して更新する想定。
-- 仕訳確定（posted）時に借貸一致を検証してからステータス更新。
-- `journals_totals_check` を厳密にする場合は、draftでは0=0のままとし、確定時に合計を更新。
-- `updated_at` はアプリ側で更新。
+## 実装時の注意
+
+このDDLは設計草案であり、まだ本番DBに適用するmigrationではない。
+Supabaseへ適用する際は、現在のSupabase CLI・PostgreSQLバージョン・Data API設定を確認し、migrationとして作成する。
+適用後はRLS、Storage policy、database advisorを確認する。
