@@ -155,15 +155,17 @@ try {
   const payable=(source==="all"||source==="card") ? await cardPayable(cid) : null;
   const bank=(source==="all"||source==="bank") ? await bankAccount(cid) : null;
   const cards=(source==="all"||source==="card") ? await sql`
-    select id,used_date,merchant_name,amount from accounting.card_transactions
-    where company_id=${cid} and matched_journal_id is null
+    select id,used_date,merchant_name,amount
+    from accounting.card_transaction_reconciliation_v
+    where company_id=${cid} and reconciliation_status='unmatched'
       and (${from}::date is null or used_date>=${from}::date)
       and (${to}::date is null or used_date<=${to}::date)
     order by used_date,id
   ` : [];
   const banks=(source==="all"||source==="bank") ? await sql`
-    select id,transaction_date,description,amount from accounting.bank_transactions
-    where company_id=${cid} and matched_journal_id is null
+    select id,transaction_date,description,amount
+    from accounting.bank_transaction_reconciliation_v
+    where company_id=${cid} and effective_reconciliation_status='unmatched'
       and (${from}::date is null or transaction_date>=${from}::date)
       and (${to}::date is null or transaction_date<=${to}::date)
     order by transaction_date,id
