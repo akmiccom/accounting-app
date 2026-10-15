@@ -31,7 +31,8 @@ akmic合同会社の会計処理を、Money Forward クラウド依存から段�
 ### 2026年度: 2026-11-01 ～ 2027-10-31
 
 - Supabaseを会計DB＋証憑本体の保存基盤として運用する
-- GMOあおぞらネット銀行と法人カードはCSV取込を基本とする
+- GMOあおぞらネット銀行はAPI自動取込を基本とし、CSVはバックアップ・検証用とする
+- 法人カードは当面CSV取込を基本とする
 - Google Sheetsで未照合・仕訳候補・月次集計・帳票を確認する
 - 自動仕訳は候補生成までとし、当面は人が確認してpostedにする
 - 法人経費はGMOあおぞらネット銀行のデビットカードを基本決済手段とする
@@ -143,6 +144,32 @@ Google Sheets
 ├─ PL
 └─ BS
 ```
+
+## GMOあおぞらネット銀行 API
+
+sunabarで、法人APIの以下の疎通を確認済みです。
+
+- 口座一覧照会
+- 残高照会
+- 入出金明細照会
+
+API明細は `scripts/sync-gmo-bank.mjs` で `accounting.bank_transactions` へ取り込みます。
+
+`itemKey` は口座IDごとの明細キーなので、DB側では `accountId:itemKey` を `source_record_id` として保持します。入出コードは `1=入金`、`2=出金` として、DBの `amount` は入金を正、出金を負に正規化します。
+
+実行例:
+
+```powershell
+npm run bank:sync:gmo -- --from=2026-10-01 --to=2026-10-15
+```
+
+DBへ書き込まずAPIレスポンスだけ確認する場合:
+
+```powershell
+npm run bank:sync:gmo -- --from=2026-10-01 --to=2026-10-15 --dry-run
+```
+
+認証情報は `.env.local` にのみ保存し、Gitへコミットしません。
 
 ## 照合ステータス
 
