@@ -111,6 +111,28 @@ function AccountList({ groups, valueLabel }: { groups: AccountGroup[]; valueLabe
   );
 }
 
+function ReportSection({
+  title,
+  total,
+  groups,
+  valueLabel,
+}: {
+  title: string;
+  total: number;
+  groups: AccountGroup[];
+  valueLabel: string;
+}) {
+  return (
+    <section className="report-section">
+      <div className="section-title-row">
+        <h2>{title}</h2>
+        <strong>¥{yen(total)}</strong>
+      </div>
+      <AccountList groups={groups} valueLabel={valueLabel} />
+    </section>
+  );
+}
+
 export default async function ReportsPage({ searchParams }: Props) {
   const p = await searchParams;
   const type = p.type === "bs" ? "bs" : "pl";
@@ -172,14 +194,16 @@ export default async function ReportsPage({ searchParams }: Props) {
   const assetTotal = assets.reduce((sum, g) => sum + g.amount, 0);
   const liabilityTotal = liabilities.reduce((sum, g) => sum + g.amount, 0);
   const equityTotal = equity.reduce((sum, g) => sum + g.amount, 0);
+  const liabilityEquityTotal = liabilityTotal + equityTotal;
+  const balanceDifference = assetTotal - liabilityEquityTotal;
 
   return (
-    <>
+    <div className="content-page">
       <div className="page-heading">
         <div>
-          <h1>{type === "pl" ? "損益" : "残高"}</h1>
+          <h1>{type === "pl" ? "損益" : "貸借対照表"}</h1>
           <p className="lead">
-            {type === "pl" ? "今月の収益・費用と、その内訳をシンプルに確認します。" : "資産・負債・純資産の残高を確認します。"}
+            {type === "pl" ? "収益と費用を左右に並べて確認します。" : "資産と負債・純資産を左右に並べて確認します。"}
           </p>
         </div>
         <div className="period-chip">{periodLabel}</div>
@@ -221,20 +245,20 @@ export default async function ReportsPage({ searchParams }: Props) {
             </div>
           </section>
 
-          <section className="report-section">
-            <div className="section-title-row">
-              <h2>収益</h2>
-              <strong>¥{yen(revenueTotal)}</strong>
+          <div className="report-columns">
+            <div className="report-column">
+              <ReportSection title="収益" total={revenueTotal} groups={revenue} valueLabel="収益" />
             </div>
-            <AccountList groups={revenue} valueLabel="収益" />
-          </section>
+            <div className="report-column">
+              <ReportSection title="費用" total={expenseTotal} groups={expenses} valueLabel="費用" />
+            </div>
+          </div>
 
-          <section className="report-section">
-            <div className="section-title-row">
-              <h2>費用</h2>
-              <strong>¥{yen(expenseTotal)}</strong>
+          <section className="report-result">
+            <div className={`report-result-row total ${profit < 0 ? "negative" : "positive"}`}>
+              <span>損益</span>
+              <strong>¥{yen(profit)}</strong>
             </div>
-            <AccountList groups={expenses} valueLabel="費用" />
           </section>
         </>
       ) : (
@@ -245,20 +269,32 @@ export default async function ReportsPage({ searchParams }: Props) {
             <div className="summary-card"><span>純資産</span><strong>¥{yen(equityTotal)}</strong></div>
           </section>
 
-          <section className="report-section">
-            <div className="section-title-row"><h2>資産</h2><strong>¥{yen(assetTotal)}</strong></div>
-            <AccountList groups={assets} valueLabel="残高" />
-          </section>
-          <section className="report-section">
-            <div className="section-title-row"><h2>負債</h2><strong>¥{yen(liabilityTotal)}</strong></div>
-            <AccountList groups={liabilities} valueLabel="残高" />
-          </section>
-          <section className="report-section">
-            <div className="section-title-row"><h2>純資産</h2><strong>¥{yen(equityTotal)}</strong></div>
-            <AccountList groups={equity} valueLabel="残高" />
+          <div className="report-columns">
+            <div className="report-column">
+              <ReportSection title="資産" total={assetTotal} groups={assets} valueLabel="残高" />
+            </div>
+            <div className="report-column">
+              <ReportSection title="負債" total={liabilityTotal} groups={liabilities} valueLabel="残高" />
+              <ReportSection title="純資産" total={equityTotal} groups={equity} valueLabel="残高" />
+            </div>
+          </div>
+
+          <section className="report-result">
+            <div className="report-result-row">
+              <span>資産合計</span>
+              <strong>¥{yen(assetTotal)}</strong>
+            </div>
+            <div className="report-result-row">
+              <span>負債・純資産合計</span>
+              <strong>¥{yen(liabilityEquityTotal)}</strong>
+            </div>
+            <div className={`report-result-row total ${Math.abs(balanceDifference) < 0.5 ? "positive" : "negative"}`}>
+              <span>差額</span>
+              <strong>¥{yen(balanceDifference)}</strong>
+            </div>
           </section>
         </>
       )}
-    </>
+    </div>
   );
 }
