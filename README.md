@@ -23,8 +23,9 @@ akmic合同会社の会計処理を、Money Forward クラウド依存から段�
 ### 2025年度: 2025-11-01 ～ 2026-10-31
 
 - MFクラウドを正式な会計処理の基準として継続する
-- MF API仕訳をSupabaseへ取り込み、自前集計と照合する
-- 証憑インデックス、カード明細、銀行明細をSupabaseへ取り込み、仕訳と照合する
+- MF仕訳CSVをSupabaseへ追加取り込みし、自前集計と照合する
+- GMO銀行CSV・SMBCカードCSVをSupabaseへ取り込み、MF仕訳と再照合する
+- 同じCSVを再投入しても二重登録しない冪等インポートを前提とする
 - 決算・申告完了後に最終バックアップを取得してからMFクラウド解約を判断する
 - 年度末まではMF側で追加された仕訳を再取得し、未照合を解消する
 
@@ -43,10 +44,11 @@ akmic合同会社の会計処理を、Money Forward クラウド依存から段�
 
 - FY2021～FY2024: Supabaseへ移行済み
 - FY2024: 総勘定元帳・試算表・月次PL/BSまで基準資料と一致確認済み
-- FY2025: 403仕訳 / 817明細を取り込み済み
-- FY2025取込範囲: 2025-11-01 ～ 2026-09-27
-- FY2025借方合計 = 貸方合計 = 28,990,831円
-- FY2025仕訳は403件すべてposted
+- FY2025: 425仕訳 / 861明細を取り込み済み
+- FY2025取込範囲: 2025-11-01 ～ 2026-10-14
+- FY2025仕訳は425件すべてposted
+- MF仕訳CSVインポータは再投入時に既存仕訳をduplicate判定し、二重登録しない
+- 2026-09-01～2026-10-16抽出CSVでは、初回追加22件・既存35件、再投入時57件すべてduplicateを確認済み
 
 ### 証憑
 
@@ -57,36 +59,32 @@ akmic合同会社の会計処理を、Money Forward クラウド依存から段�
 
 ### カード照合
 
-FY2025対象カード明細は318件。
+FY2025対象SMBCカード明細は354件。
 
-- `direct`: 316件
+- `direct`: 318件
 - `group`: 2件
 - `review`: 0件
-- `unmatched`: 0件
+- `unmatched`: 34件
 
 同日・同額で1対1対応を安全に決められない場合は、無理に `matched_journal_id` を設定せず、
 `reconciliation_groups` を使って集合として照合する。
 
-現在の2件は 2026-04-11 / 150円 × 2件で、カード2件と仕訳2件を2対2のグループとして照合済み。
+現在の `group` 2件は 2026-04-11 / 150円 × 2件で、カード2件と仕訳2件を2対2のグループとして照合済み。
+
+`unmatched` は主に、カードCSV側には存在するが対応MF仕訳がまだ未取込、または対象期間外・照合条件未成立の明細。
+MF仕訳追加取込後は `npm run reconcile:preview` / `npm run reconcile:run` で安全な1対1候補だけ再照合する。
 
 ### 銀行照合
 
-GMOあおぞらネット銀行明細は30件。
+FY2025対象GMOあおぞらネット銀行明細は39件。
 
-- `direct`: 28件
-- `pending_journal`: 2件
+- `direct`: 39件
+- `pending_journal`: 0件
 - `review`: 0件
 - `unmatched`: 0件
 
-`pending_journal` は銀行実績が存在するが、対応するMF仕訳がまだSupabaseへ取り込まれていない状態。
-
-現在の2件:
-
-- 2026-09-28 三井住友カード引落 45,700円
-- 2026-10-01 普通預金利息 279円
-
-9/28のカード引落45,700円は、同支払日のカード43件合計45,700円と一致している。
-MF仕訳の現在の取込最終日が2026-09-27のため、年度末の追加取込後に再照合する。
+2026-09-28 三井住友カード引落 45,700円、2026-10-01 普通預金利息 279円、
+および2026-10-10以降のVisaデビット明細を、追加取得したMF仕訳と再照合済み。
 
 ## Supabaseプロジェクト方針
 
@@ -143,6 +141,116 @@ Google Sheets
 ├─ 試算表
 ├─ PL
 └─ BS
+```
+
+## CSV取込・照合・仕訳ワークフロー
+
+現在、GMO銀行・SMBCカード・MFクラウドの3系統のCSVを同じ会計DBへ取り込み、照合して仕訳へつなげる運用が可能。
+
+### 1. GMO銀行CSV
+
+プレビュー:
+
+```powershell
+npm run bank:preview:gmo:csv -- "path\to\gmo.csv"
+```
+
+本取込:
+
+```powershell
+npm run bank:import:gmo:csv -- "path\to\gmo.csv"
+```
+
+取込先は `accounting.bank_transactions`。同一明細はハッシュ・source IDで重複登録しない。
+
+### 2. SMBCカードCSV
+
+プレビュー:
+
+```powershell
+npm run card:preview:smbc:csv -- "path\to\smbc.csv"
+```
+
+本取込:
+
+```powershell
+npm run card:import:smbc:csv -- "path\to\smbc.csv"
+```
+
+取込先は `accounting.card_transactions`。同一明細は再投入しても重複登録しない。
+
+### 3. MFクラウド仕訳CSV
+
+プレビュー:
+
+```powershell
+npm run journal:preview:mf:csv -- "path\to\moneyforward.csv"
+```
+
+本取込:
+
+```powershell
+npm run journal:import:mf:csv -- "path\to\moneyforward.csv"
+```
+
+MF仕訳CSVは、取引No単位で借方・貸方を解決して `journals / journal_lines` へ取り込む。
+既存仕訳と会計本体が一致する場合は `duplicate`、posted済み仕訳と内容が異なる場合は `conflict` として止める。
+新規MF仕訳は元データが確定仕訳であるため `posted` として登録する。
+
+### 4. 銀行・カード明細とMF仕訳の再照合
+
+候補確認:
+
+```powershell
+npm run reconcile:preview
+```
+
+反映:
+
+```powershell
+npm run reconcile:run
+```
+
+再照合は、MF CSVインポータで追加された仕訳を対象に、日付・金額が1対1で一意に対応する場合だけ
+`matched_journal_id` を設定する。曖昧な候補は自動では結び付けない。
+
+### 5. MFを使わないFY2026以降の仕訳候補
+
+銀行・カード明細から自前仕訳候補を作成する場合:
+
+```powershell
+npm run journal:candidates:preview
+npm run journal:candidates:generate
+```
+
+`accounting_rules` を優先し、ルールがない場合は過去の照合済み仕訳履歴から分類候補を作る。
+現在は purchaseルール13件、bankルール3件を登録済み。
+
+**重要:** GMO/SMBC CSVを取り込んだだけでは確定仕訳を自動postedしない。
+自動生成するのは `draft` の仕訳候補までで、人が確認してpostedへ進める。
+これはFY2026本運用開始時の誤仕訳防止のための安全設計。
+
+### 現在できること
+
+```text
+GMO CSV ─────┐
+             ├─> bank/card transactions ─┐
+SMBC CSV ────┘                            │
+                                          ├─> 照合
+MF仕訳CSV ─────> posted journals ─────────┘
+                                          │
+                                          └─> PL / BS / 総勘定元帳等
+
+FY2026以降:
+GMO / SMBC明細
+    ↓
+accounting_rules / 過去履歴
+    ↓
+draft仕訳候補
+    ↓
+人が確認
+    ↓
+posted
 ```
 
 ## GMOあおぞらネット銀行 API
@@ -203,15 +311,15 @@ npm run bank:sync:gmo -- --from=2026-10-01 --to=2026-10-15 --preview
 
 ## 直近の次作業
 
-1. 2025年度末までMFを正式基準として継続する
-2. 2026-09-28～2026-10-31のMF追加仕訳を年度末に再取得する
-3. 10月分の銀行・カード明細を追加取り込みする
-4. `pending_journal` 2件を含め、カード・銀行を再照合する
-5. 2025年度の総勘定元帳・試算表・PL・BSをMF最終値と照合する
-6. 証憑・カードCSV・銀行CSV・MF原本のStorage未保存分を補完する
-7. 最終バックアップと復元確認を行う
-8. 決算・申告完了後にMFクラウド解約を判断する
-9. FY2026からSupabase中心の本運用へ移行する
+1. 2026-10-15～2026-10-31のMF最終仕訳を追加CSV取込する
+2. 10月後半のGMO銀行・SMBCカード明細を追加取込する
+3. `reconcile:preview` → `reconcile:run` で最終再照合する
+4. FY2025の未照合カード明細を確認し、MF最終仕訳取込後も残るものだけ要確認とする
+5. FY2025の総勘定元帳・試算表・PL・BSをMF最終値と照合する
+6. FY2026開始後、`journal:candidates:preview` で自前仕訳候補の精度を検証する
+7. 証憑・カードCSV・銀行CSV・MF原本のStorage未保存分を補完する
+8. 最終バックアップと復元確認を行う
+9. 決算・申告完了後にMFクラウド解約を判断する
 
 ## ドキュメント
 
@@ -233,6 +341,7 @@ npm run bank:sync:gmo -- --from=2026-10-01 --to=2026-10-15 --preview
 - [x] FY2021～FY2024 MF仕訳インポート
 - [x] FY2024 基準資料との詳細照合
 - [x] FY2025 MF仕訳の中間インポート
+- [x] MF仕訳CSVの増分・冪等インポート
 - [x] MF CloudBox証憑インデックス取込
 - [x] FY2025証憑と仕訳のリンク
 - [x] GMOあおぞら銀行CSV取込
@@ -240,7 +349,9 @@ npm run bank:sync:gmo -- --from=2026-10-01 --to=2026-10-15 --preview
 - [x] カード直接照合
 - [x] カード2対2グループ照合
 - [x] 銀行照合ステータス管理
-- [ ] FY2025年度末MF仕訳の最終取込
+- [x] GMO / SMBC / MF CSV間の再照合コマンド
+- [x] accounting_rulesによるdraft仕訳候補生成
+- [ ] FY2025年度末MF仕訳の最終取込（10/15～10/31）
 - [ ] FY2025カード・銀行最終再照合
 - [ ] Storage原本保存の未完了分補完
 - [ ] Google Sheets確認・集計画面
