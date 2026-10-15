@@ -137,10 +137,6 @@ function lineSignature(line) {
     canonicalText(line.accountName),
     canonicalText(line.subAccountName),
     Number(line.amount).toFixed(2),
-    canonicalText(line.memo),
-    canonicalText(line.department),
-    canonicalText(line.taxName),
-    canonicalText(line.partnerName),
   ].join("|");
 }
 
@@ -393,21 +389,20 @@ function resolveAccount(master, line) {
   let subAccount = null;
 
   if (line.subAccountName || line.subAccountCode) {
-    let subs = master.subAccounts.filter((sub) => sub.account_id === account.id);
+    const accountSubs = master.subAccounts.filter(
+      (sub) => sub.account_id === account.id
+    );
+    let subs = [];
 
     if (line.subAccountCode) {
-      const byCode = subs.filter(
+      subs = accountSubs.filter(
         (sub) => canonicalText(sub.code) === canonicalText(line.subAccountCode)
       );
-      if (byCode.length) subs = byCode;
-      else subs = [];
     }
 
     if (subs.length === 0 && line.subAccountName) {
-      subs = master.subAccounts.filter(
-        (sub) =>
-          sub.account_id === account.id &&
-          canonicalText(sub.name) === canonicalText(line.subAccountName)
+      subs = accountSubs.filter(
+        (sub) => canonicalText(sub.name) === canonicalText(line.subAccountName)
       );
     }
 
@@ -471,10 +466,6 @@ function dbFingerprint(existing) {
         canonicalText(line.account_name),
         canonicalText(line.sub_account_name),
         Number(line.amount).toFixed(2),
-        canonicalText(line.memo),
-        canonicalText(line.department),
-        canonicalText(line.tax_name),
-        canonicalText(line.partner_name),
       ].join("|")
     ),
   });
