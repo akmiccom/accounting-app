@@ -130,6 +130,29 @@ function canonicalText(value) {
   return normalizeText(value).toLowerCase();
 }
 
+function isoDate(value) {
+  if (value instanceof Date) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) return match[1];
+
+  const date = new Date(value);
+  if (!Number.isNaN(date.getTime())) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  return text;
+}
+
 function lineSignature(line) {
   return [
     line.lineNo,
@@ -452,7 +475,7 @@ async function existingJournal(sql, companyId, fiscalYearId, voucherNo) {
 
 function dbFingerprint(existing) {
   return JSON.stringify({
-    entryDate: String(existing.entry_date).slice(0, 10),
+    entryDate: isoDate(existing.entry_date),
     voucherNo: String(existing.voucher_no),
     entryKind: existing.entry_kind,
     lines: existing.lines.map((line) =>
