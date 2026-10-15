@@ -9,7 +9,9 @@
     "bank:sync:gmo": "node --env-file=.env.local scripts/sync-gmo-bank.mjs",
     "bank:preview:gmo": "node --env-file=.env.local scripts/sync-gmo-bank.mjs --preview",
     "bank:import:gmo:csv": "node --env-file=.env.local scripts/import-gmo-bank-csv.mjs",
-    "bank:preview:gmo:csv": "node --env-file=.env.local scripts/import-gmo-bank-csv.mjs --preview"
+    "bank:preview:gmo:csv": "node --env-file=.env.local scripts/import-gmo-bank-csv.mjs --preview",
+    "card:import:smbc:csv": "node --env-file=.env.local scripts/import-smbc-card-csv.mjs",
+    "card:preview:smbc:csv": "node --env-file=.env.local scripts/import-smbc-card-csv.mjs --preview"
   },
   "dependencies": {
     "next": "latest",
