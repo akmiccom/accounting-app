@@ -28,6 +28,104 @@ function oneVariant(rows) {
   return [...m.values()];
 }
 
+function normalizeMatchText(value) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function ruleTextMatches(rule, text) {
+  const value = normalizeMatchText(rule.match_value);
+  const target = normalizeMatchText(text);
+  if (rule.match_type === "exact") return target === value;
+  if (rule.match_type === "contains") return target.includes(value);
+  if (rule.match_type === "prefix") return target.startsWith(value);
+  return false;
+}
+
+async function findAccountingRule(companyId, sourceKind, text, amount, direction, date) {
+  const rows = await sql`
+    select
+      r.id,
+      r.name,
+      r.match_type,
+      r.match_value,
+      r.direction,
+      r.priority,
+      r.auto_post,
+      da.id as debit_account_id,
+      da.name as debit_account_name,
+      dsa.id as debit_sub_account_id,
+      dsa.name as debit_sub_account_name,
+      r.debit_tax_name,
+      r.debit_department,
+      ca.id as credit_account_id,
+      ca.name as credit_account_name,
+      csa.id as credit_sub_account_id,
+      csa.name as credit_sub_account_name,
+      r.credit_tax_name,
+      r.credit_department
+    from accounting.accounting_rules r
+    join accounting.accounts da on da.id = r.debit_account_id
+    join accounting.accounts ca on ca.id = r.credit_account_id
+    left join accounting.sub_accounts dsa on dsa.id = r.debit_sub_account_id
+    left join accounting.sub_accounts csa on csa.id = r.credit_sub_account_id
+    where r.company_id = ${companyId}
+      and r.source_kind = ${sourceKind}
+      and r.is_active = true
+      and (r.direction = 'any' or r.direction = ${direction})
+      and (r.amount_min is null or ${amount} >= r.amount_min)
+      and (r.amount_max is null or ${amount} <= r.amount_max)
+      and (r.valid_from is null or ${date}::date >= r.valid_from)
+      and (r.valid_to is null or ${date}::date <= r.valid_to)
+    order by r.priority desc, r.created_at asc
+  `;
+
+  const matches = rows.filter((row) => ruleTextMatches(row, text));
+  if (!matches.length) return { ok:false, reason:"no_rule" };
+
+  const topPriority = matches[0].priority;
+  const top = matches.filter((row) => row.priority === topPriority);
+  const outcomeKey = (row) => [
+    row.debit_account_id,
+    row.debit_sub_account_id ?? "",
+    row.debit_tax_name ?? "",
+    row.debit_department ?? "",
+    row.credit_account_id,
+    row.credit_sub_account_id ?? "",
+    row.credit_tax_name ?? "",
+    row.credit_department ?? "",
+  ].join("|");
+  const outcomes = new Set(top.map(outcomeKey));
+  if (outcomes.size > 1) {
+    return { ok:false, reason:"ambiguous_rule", count:top.length };
+  }
+
+  const rule = top[0];
+  return {
+    ok:true,
+    rule,
+    debit:{
+      account_id:rule.debit_account_id,
+      account_name:rule.debit_account_name,
+      sub_account_id:rule.debit_sub_account_id,
+      sub_account_name:rule.debit_sub_account_name,
+      tax_name:rule.debit_tax_name,
+      department:rule.debit_department,
+    },
+    credit:{
+      account_id:rule.credit_account_id,
+      account_name:rule.credit_account_name,
+      sub_account_id:rule.credit_sub_account_id,
+      sub_account_name:rule.credit_sub_account_name,
+      tax_name:rule.credit_tax_name,
+      department:rule.credit_department,
+    },
+  };
+}
+
 const databaseUrl = env("DATABASE_URL");
 const companyName = process.env.ACCOUNTING_COMPANY_NAME?.trim() || "akmic合同会社";
 const source = arg("source") || "all";
@@ -149,7 +247,7 @@ async function createDraft(tx, p) {
   return true;
 }
 
-const summary={inspected:0,candidates:0,created:0,existing:0,noHistory:0,ambiguous:0,other:0};
+const summary={inspected:0,candidates:0,created:0,existing:0,ruleMatches:0,historyMatches:0,noHistory:0,ambiguous:0,ruleAmbiguous:0,other:0};
 try {
   const cid=await companyId();
   const payable=(source==="all"||source==="card") ? await cardPayable(cid) : null;
@@ -178,14 +276,46 @@ try {
     if (await existing(cid,sr)) { summary.existing++; continue; }
     const fy=await fiscalYear(cid,t.used_date);
     if (!fy) { summary.other++; continue; }
+    const amount=Number(t.amount);
+    const rule=await findAccountingRule(cid,"card",t.merchant_name,amount,"outflow",t.used_date);
+    if (rule.ok) {
+      proposals.push({
+        kind:"card", companyId:cid, fiscalYearId:fy, date:t.used_date, description:t.merchant_name,
+        amount, debit:rule.debit, credit:rule.credit, sourceRecordId:sr,
+        voucherNo:"AUTO-CARD-"+t.id,
+        sourceData:{
+          candidate_kind:"card",
+          transaction_id:t.id,
+          classification_method:"accounting_rule",
+          accounting_rule_id:rule.rule.id,
+          accounting_rule_name:rule.rule.name,
+          auto_post_requested:rule.rule.auto_post,
+          review_required:true
+        }
+      });
+      summary.ruleMatches++;
+      summary.candidates++;
+      continue;
+    }
+    if (rule.reason==="ambiguous_rule") {
+      summary.ruleAmbiguous++;
+      continue;
+    }
     const l=await learnCard(cid,t);
     if (!l.ok) { l.reason==="no_history" ? summary.noHistory++ : summary.ambiguous++; continue; }
     proposals.push({
       kind:"card", companyId:cid, fiscalYearId:fy, date:t.used_date, description:t.merchant_name,
-      amount:Number(t.amount), debit:l.row, credit:payable, sourceRecordId:sr,
+      amount, debit:l.row, credit:payable, sourceRecordId:sr,
       voucherNo:"AUTO-CARD-"+t.id,
-      sourceData:{candidate_kind:"card",transaction_id:t.id,history_count:l.row.usage_count,review_required:true}
+      sourceData:{
+        candidate_kind:"card",
+        transaction_id:t.id,
+        classification_method:"history",
+        history_count:l.row.usage_count,
+        review_required:true
+      }
     });
+    summary.historyMatches++;
     summary.candidates++;
   }
 
@@ -195,24 +325,61 @@ try {
     if (await existing(cid,sr)) { summary.existing++; continue; }
     const fy=await fiscalYear(cid,t.transaction_date);
     if (!fy) { summary.other++; continue; }
+    const signedAmount=Number(t.amount);
+    const amount=Math.abs(signedAmount);
+    const direction=signedAmount<0 ? "outflow" : "inflow";
+    const rule=await findAccountingRule(cid,"bank",t.description || "",amount,direction,t.transaction_date);
+    if (rule.ok) {
+      proposals.push({
+        kind:"bank", companyId:cid, fiscalYearId:fy, date:t.transaction_date, description:t.description || "銀行取引",
+        amount, debit:rule.debit, credit:rule.credit, sourceRecordId:sr,
+        voucherNo:"AUTO-BANK-"+t.id,
+        sourceData:{
+          candidate_kind:"bank",
+          transaction_id:t.id,
+          classification_method:"accounting_rule",
+          accounting_rule_id:rule.rule.id,
+          accounting_rule_name:rule.rule.name,
+          auto_post_requested:rule.rule.auto_post,
+          review_required:true
+        }
+      });
+      summary.ruleMatches++;
+      summary.candidates++;
+      continue;
+    }
+    if (rule.reason==="ambiguous_rule") {
+      summary.ruleAmbiguous++;
+      continue;
+    }
     const l=await learnBank(cid,t,bank);
     if (!l.ok) { l.reason==="no_history" ? summary.noHistory++ : l.reason==="ambiguous" ? summary.ambiguous++ : summary.other++; continue; }
-    const out=Number(t.amount)<0;
+    const out=signedAmount<0;
     proposals.push({
       kind:"bank", companyId:cid, fiscalYearId:fy, date:t.transaction_date, description:t.description || "銀行取引",
-      amount:Math.abs(Number(t.amount)), debit:out ? l.row : bank, credit:out ? bank : l.row,
+      amount, debit:out ? l.row : bank, credit:out ? bank : l.row,
       sourceRecordId:sr, voucherNo:"AUTO-BANK-"+t.id,
-      sourceData:{candidate_kind:"bank",transaction_id:t.id,history_count:l.row.usage_count,review_required:true}
+      sourceData:{
+        candidate_kind:"bank",
+        transaction_id:t.id,
+        classification_method:"history",
+        history_count:l.row.usage_count,
+        review_required:true
+      }
     });
+    summary.historyMatches++;
     summary.candidates++;
   }
 
   console.log("Journal candidates:",summary);
   for (const p of proposals) {
+    const basis = p.sourceData.classification_method === "accounting_rule"
+      ? "| rule="+p.sourceData.accounting_rule_name
+      : "| history="+p.sourceData.history_count;
     console.log("["+p.kind+"]",p.date,p.description,p.amount+"円",
       "| 借方="+p.debit.account_name+(p.debit.sub_account_name?"/"+p.debit.sub_account_name:""),
       "| 貸方="+p.credit.account_name+(p.credit.sub_account_name?"/"+p.credit.sub_account_name:""),
-      "| history="+p.sourceData.history_count);
+      basis);
   }
   if (preview) {
     console.log("Preview mode: journal writes skipped.");
