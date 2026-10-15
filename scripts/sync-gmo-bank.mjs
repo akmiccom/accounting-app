@@ -49,7 +49,7 @@ const baseUrl = (
 
 const to = arg("to") || isoDate(new Date());
 const from = arg("from") || defaultFrom(to);
-const dryRun = process.argv.includes("--dry-run");
+const preview = process.argv.includes("--preview") || process.argv.includes("--dry-run");
 
 if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
   throw new Error("--from and --to must be YYYY-MM-DD");
@@ -93,7 +93,8 @@ async function fetchTransactions() {
 const transactions = await fetchTransactions();
 console.log(`GMO API: ${from} - ${to}, ${transactions.length} transaction(s)`);
 
-if (dryRun) {
+if (preview) {
+  console.log("Preview mode: database write skipped.");
   console.dir(transactions, { depth: null });
   process.exit(0);
 }
