@@ -144,8 +144,6 @@ function journalFingerprint(journal) {
   return JSON.stringify({
     entryDate: journal.entryDate,
     voucherNo: String(journal.voucherNo),
-    description: canonicalText(journal.description),
-    memo: canonicalText(journal.memo),
     entryKind: journal.entryKind,
     lines: [...journal.lines].sort((a, b) => {
       if (a.lineNo !== b.lineNo) return a.lineNo - b.lineNo;
@@ -456,8 +454,6 @@ function dbFingerprint(existing) {
   return JSON.stringify({
     entryDate: String(existing.entry_date).slice(0, 10),
     voucherNo: String(existing.voucher_no),
-    description: canonicalText(existing.description),
-    memo: canonicalText(existing.memo),
     entryKind: existing.entry_kind,
     lines: existing.lines.map((line) =>
       [
