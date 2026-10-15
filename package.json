@@ -13,7 +13,9 @@
     "card:import:smbc:csv": "node --env-file=.env.local scripts/import-smbc-card-csv.mjs",
     "card:preview:smbc:csv": "node --env-file=.env.local scripts/import-smbc-card-csv.mjs --preview",
     "journal:candidates:preview": "node --env-file=.env.local scripts/generate-journal-candidates.mjs --preview",
-    "journal:candidates:generate": "node --env-file=.env.local scripts/generate-journal-candidates.mjs"
+    "journal:candidates:generate": "node --env-file=.env.local scripts/generate-journal-candidates.mjs",
+    "journal:preview:mf:csv": "node --env-file=.env.local scripts/import-moneyforward-journals-csv.mjs --preview",
+    "journal:import:mf:csv": "node --env-file=.env.local scripts/import-moneyforward-journals-csv.mjs"
   },
   "dependencies": {
     "next": "latest",
