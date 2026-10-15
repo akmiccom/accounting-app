@@ -189,14 +189,14 @@ td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
   font-variant-numeric: tabular-nums;
 }
 
-.journal-table .col-date { width: 92px; }
-.journal-table .col-voucher { width: 68px; }
-.journal-table .col-account { width: 110px; }
-.journal-table .col-subaccount { width: 120px; }
-.journal-table .col-amount { width: 92px; }
-.journal-table .col-description { width: auto; }
+.journal-table .col-date { width: 90px; }
+.journal-table .col-voucher { width: 70px; }
+.journal-table .col-account { width: 9%; }
+.journal-table .col-subaccount { width: 10%; }
+.journal-table .col-amount { width: 90px; }
+.journal-table .col-description { width: 28%; }
 .journal-table .col-receipt { width: 55px; }
-.journal-table .col-status { width: 72px; }
+.journal-table .col-status { width: 70px; }
 
 @media (max-width: 1000px) {
   .report-columns {
