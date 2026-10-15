@@ -36,6 +36,12 @@ function normalizeMatchText(value) {
     .toLowerCase();
 }
 
+function extractVisaDebitMerchant(description) {
+  const text = String(description ?? "").normalize("NFKC").trim();
+  const match = text.match(/^Visaデビット利用\s+(.+?)\s+承認番号[:：]/i);
+  return match ? match[1].trim() : null;
+}
+
 function ruleTextMatches(rule, text) {
   const value = normalizeMatchText(rule.match_value);
   const target = normalizeMatchText(text);
@@ -69,7 +75,7 @@ async function findAccountingRule(companyId, sourceKind, text, amount, direction
       r.credit_department
     from accounting.accounting_rules r
     join accounting.accounts da on da.id = r.debit_account_id
-    join accounting.accounts ca on ca.id = r.credit_account_id
+    left join accounting.accounts ca on ca.id = r.credit_account_id
     left join accounting.sub_accounts dsa on dsa.id = r.debit_sub_account_id
     left join accounting.sub_accounts csa on csa.id = r.credit_sub_account_id
     where r.company_id = ${companyId}
@@ -277,16 +283,22 @@ try {
     const fy=await fiscalYear(cid,t.used_date);
     if (!fy) { summary.other++; continue; }
     const amount=Number(t.amount);
-    const rule=await findAccountingRule(cid,"card",t.merchant_name,amount,"outflow",t.used_date);
+    let rule=await findAccountingRule(cid,"purchase",t.merchant_name,amount,"outflow",t.used_date);
+    let ruleKind="purchase";
+    if (!rule.ok && rule.reason==="no_rule") {
+      rule=await findAccountingRule(cid,"card",t.merchant_name,amount,"outflow",t.used_date);
+      ruleKind="card";
+    }
     if (rule.ok) {
       proposals.push({
         kind:"card", companyId:cid, fiscalYearId:fy, date:t.used_date, description:t.merchant_name,
-        amount, debit:rule.debit, credit:rule.credit, sourceRecordId:sr,
+        amount, debit:rule.debit, credit:payable, sourceRecordId:sr,
         voucherNo:"AUTO-CARD-"+t.id,
         sourceData:{
           candidate_kind:"card",
           transaction_id:t.id,
           classification_method:"accounting_rule",
+          accounting_rule_kind:ruleKind,
           accounting_rule_id:rule.rule.id,
           accounting_rule_name:rule.rule.name,
           auto_post_requested:rule.rule.auto_post,
@@ -328,16 +340,36 @@ try {
     const signedAmount=Number(t.amount);
     const amount=Math.abs(signedAmount);
     const direction=signedAmount<0 ? "outflow" : "inflow";
-    const rule=await findAccountingRule(cid,"bank",t.description || "",amount,direction,t.transaction_date);
+    const debitMerchant = signedAmount < 0 ? extractVisaDebitMerchant(t.description) : null;
+    let rule;
+    let ruleKind;
+    if (debitMerchant) {
+      rule=await findAccountingRule(cid,"purchase",debitMerchant,amount,"outflow",t.transaction_date);
+      ruleKind="purchase";
+    } else {
+      rule={ok:false,reason:"no_rule"};
+    }
+    if (!rule.ok && rule.reason==="no_rule") {
+      rule=await findAccountingRule(cid,"bank",t.description || "",amount,direction,t.transaction_date);
+      ruleKind="bank";
+    }
     if (rule.ok) {
       proposals.push({
-        kind:"bank", companyId:cid, fiscalYearId:fy, date:t.transaction_date, description:t.description || "銀行取引",
-        amount, debit:rule.debit, credit:rule.credit, sourceRecordId:sr,
+        kind:debitMerchant ? "debit" : "bank",
+        companyId:cid, fiscalYearId:fy, date:t.transaction_date,
+        description:debitMerchant || t.description || "銀行取引",
+        amount,
+        debit:rule.debit,
+        credit:debitMerchant ? bank : rule.credit,
+        sourceRecordId:sr,
         voucherNo:"AUTO-BANK-"+t.id,
         sourceData:{
-          candidate_kind:"bank",
+          candidate_kind:debitMerchant ? "debit_card" : "bank",
           transaction_id:t.id,
+          original_bank_description:t.description,
+          normalized_merchant:debitMerchant,
           classification_method:"accounting_rule",
+          accounting_rule_kind:ruleKind,
           accounting_rule_id:rule.rule.id,
           accounting_rule_name:rule.rule.name,
           auto_post_requested:rule.rule.auto_post,
