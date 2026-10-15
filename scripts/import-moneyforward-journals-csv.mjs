@@ -497,6 +497,10 @@ async function classify(sql, companyId, master, journals) {
           journal: resolved,
           existing,
           reason: `Existing journal ${existing.status}/${existing.source_system} differs`,
+          debug: {
+            csvFingerprint: journalFingerprint(resolved),
+            dbFingerprint: dbFingerprint(existing),
+          },
         });
       }
     } catch (error) {
@@ -648,6 +652,10 @@ try {
     console.log(
       `[${item.action}] No=${j.voucherNo} ${j.entryDate} ${j.description ?? ""} debit=${j.totalDebit} credit=${j.totalCredit}${item.reason ? ` | ${item.reason}` : ""}`
     );
+    if (item.action === "conflict" && item.debug) {
+      console.log("  CSV:", item.debug.csvFingerprint);
+      console.log("  DB :", item.debug.dbFingerprint);
+    }
   }
 
   if (parseErrors.length) {
