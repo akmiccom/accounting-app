@@ -114,7 +114,7 @@ export async function saveBankTransactions(
   for (const transaction of transactions) {
     if (transaction.sourceRecordId) {
       const existing = await tx`
-        select id
+        select id, source_row_hash
         from accounting.bank_transactions
         where company_id = ${companyId}
           and source_system = ${transaction.sourceSystem}
@@ -123,6 +123,11 @@ export async function saveBankTransactions(
       `;
 
       if (existing.length === 1) {
+        if (existing[0].source_row_hash === transaction.sourceRowHash) {
+          duplicates += 1;
+          continue;
+        }
+
         await tx`
           update accounting.bank_transactions
           set transaction_date = ${transaction.transactionDate},
