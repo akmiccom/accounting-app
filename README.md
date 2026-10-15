@@ -163,10 +163,10 @@ API明細は `scripts/sync-gmo-bank.mjs` で `accounting.bank_transactions` へ�
 npm run bank:sync:gmo -- --from=2026-10-01 --to=2026-10-15
 ```
 
-DBへ書き込まずAPIレスポンスだけ確認する場合:
+DBへ書き込まずAPIレスポンスだけ確認する場合（npmの `--dry-run` と衝突しないよう `--preview` を使用）:
 
 ```powershell
-npm run bank:sync:gmo -- --from=2026-10-01 --to=2026-10-15 --dry-run
+npm run bank:sync:gmo -- --from=2026-10-01 --to=2026-10-15 --preview
 ```
 
 認証情報は `.env.local` にのみ保存し、Gitへコミットしません。
