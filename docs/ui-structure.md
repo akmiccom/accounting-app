@@ -1,96 +1,114 @@
-# 画面構成案（Next.js）
+# 画面構成案
 
-> 目的: MVPの画面と導線を明確にし、実装優先度を揃える。
+> 現時点ではGoogle Sheetsを主な確認・照合画面とし、Next.js UIは将来実装する。DBとStorageが正本であり、UIはそれらを操作・参照するためのフロントエンドとする。
 
-## 画面一覧（MVP）
+## MVP画面候補
 
-### 1. ログイン
-- パス: `/login`
-- 概要: 認証（JWT発行）
-- 役割: 全ロール
+### 1. ダッシュボード `/`
 
-### 2. ダッシュボード
-- パス: `/`
-- 概要: 当月の仕訳件数、未確定件数、主要KPI
-- 役割: admin/accountant/viewer
+- 当月仕訳件数
+- draft / posted件数
+- カード照合状態
+- 銀行照合状態
+- pending_journal / review / unmatched件数
+- 証憑要確認件数
 
-### 3. 勘定科目マスタ
-- 一覧: `/accounts`
-- 作成/編集: `/accounts/new`, `/accounts/[id]`
-- 概要: 科目コード・名称・区分・有効/無効
-- 役割: admin
+### 2. 仕訳 `/journals`
 
-### 4. 仕訳入力
-- 一覧: `/journals`
-- 新規: `/journals/new`
-- 詳細/編集: `/journals/[id]`
-- 確定: 詳細画面から「確定」アクション
-- 概要: ヘッダ + 明細（複数行）、借貸合計の即時検証
-- 役割: accountant（閲覧はviewer以上）
+- 一覧
+- 詳細
+- draft作成・編集
+- posted確定
+- reverse / 調整
+- 証憑リンク
 
-### 5. 総勘定元帳
-- パス: `/ledger`
-- 概要: 科目選択 + 期間指定 + 仕訳一覧
-- 役割: viewer以上
+### 3. 証憑 `/receipts`
 
-### 6. 試算表
-- パス: `/trial-balance`
-- 概要: 期首/当期/期末残高の一覧
-- 役割: viewer以上
+- 日付・金額・取引先・receipt_code検索
+- 要確認一覧
+- Storage原本閲覧
+- 関連仕訳表示
 
-### 7. PL/BS
-- 損益計算書: `/reports/pl`
-- 貸借対照表: `/reports/bs`
-- 概要: 期間指定の簡易集計
-- 役割: viewer以上
+### 4. カード照合 `/reconciliation/cards`
 
-### 8. CSV入出力
-- パス: `/import-export`
-- 概要: 仕訳CSVのインポート/エクスポート
-- 役割: accountant以上
+- direct
+- group
+- review
+- unmatched
+- group照合の構成カード・仕訳確認
 
-### 9. 監査ログ
-- パス: `/audit-logs`
-- 概要: 重要操作の履歴参照
-- 役割: admin
+### 5. 銀行照合 `/reconciliation/banks`
 
----
+- direct
+- pending_journal
+- review
+- unmatched
+- pending_journalの原因表示
 
-## 画面遷移（簡易）
+### 6. 総勘定元帳 `/ledger`
 
-```
-/login
-  ↓
-/dashboard
-  ├── /accounts
-  ├── /journals
-  │     ├── /journals/new
-  │     └── /journals/[id]
-  ├── /ledger
-  ├── /trial-balance
-  ├── /reports/pl
-  ├── /reports/bs
-  ├── /import-export
-  └── /audit-logs
-```
+- 科目選択
+- 期間指定
+- 補助科目
+- 仕訳へのドリルダウン
 
----
+### 7. 試算表 `/trial-balance`
 
-## UIコンポーネント（共通）
-- グローバルナビ（左サイド or 上部）
-- 期間フィルタ（from/to）
-- テーブル（仕訳/帳票）
-- 仕訳明細入力テーブル（行追加/削除）
-- エラートースト（借貸不一致など）
+- 会計年度選択
+- 期首 / 当期 / 期末
 
----
+### 8. PL / BS
 
-## MVPの実装優先度
-1. 仕訳入力
-2. 総勘定元帳
-3. 試算表
-4. 勘定科目マスタ
-5. PL/BS
-6. CSV入出力
-7. 監査ログ
+- `/reports/pl`
+- `/reports/bs`
+- 月次 / 年次
+- MF比較用表示
 
+### 9. 取込履歴 `/imports`
+
+- MF
+- 銀行CSV
+- カードCSV
+- 原本ファイル名
+- SHA-256
+- row_count
+- Storage保存状態
+
+### 10. 監査ログ `/audit-logs`
+
+- 重要操作の履歴参照
+
+## 当面のGoogle Sheets画面
+
+Next.js実装前はGoogle Sheetsを次の用途に限定する。
+
+- 未照合・pending・review一覧
+- 証憑検索・リンク
+- 仕訳候補
+- 月次集計
+- 試算表
+- PL / BS
+
+Sheetsは正本ではない。
+
+## UI共通ルール
+
+- posted仕訳を直接編集させない
+- 不明値をUI側で勝手に補完しない
+- 1対1確定できない照合を強制的に結び付けない
+- private Storageの恒久URLを保存しない
+- signed URLは表示時に生成する
+- エラー表示は借貸不一致・重複取込・照合曖昧性を区別する
+
+## 実装優先度
+
+1. Google Sheets確認・照合
+2. 証憑検索
+3. カード/銀行照合
+4. 仕訳参照・draft入力
+5. 総勘定元帳
+6. 試算表
+7. PL / BS
+8. 取込履歴
+9. 監査ログ
+10. 必要に応じてNext.js UIへ置換
