@@ -44,6 +44,17 @@ async function cardCandidates(companyId) {
       join accounting.accounts a on a.id=jl.account_id
       left join accounting.sub_accounts sa on sa.id=jl.sub_account_id
       where j.source_system='moneyforward'
+        and coalesce(j.source_data ? 'import_file_id', false)
+        and not exists (
+          select 1
+          from accounting.card_transactions used_card
+          where used_card.matched_journal_id=j.id
+        )
+        and not exists (
+          select 1
+          from accounting.reconciliation_group_journals used_group
+          where used_group.journal_id=j.id
+        )
         and a.name='未払金'
         and sa.name in (
           '三井住友カードご本人/代表会員オーナーズV',
@@ -112,6 +123,12 @@ async function bankCandidates(companyId) {
         on ba.account_id=jl.account_id
        and ba.sub_account_id=jl.sub_account_id
       where j.source_system='moneyforward'
+        and coalesce(j.source_data ? 'import_file_id', false)
+        and not exists (
+          select 1
+          from accounting.bank_transactions used_bank
+          where used_bank.matched_journal_id=j.id
+        )
     ),
     tx as (
       select b.id,b.transaction_date,b.amount,b.description
