@@ -75,3 +75,145 @@ td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
   .summary-card strong{font-size:18px}
   .subaccount-row{padding-left:34px}
 }
+
+
+/* Page-specific width: keep dashboard unchanged */
+.content-page {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.journal-page {
+  width: 100%;
+  max-width: none;
+}
+
+/* PL / BS two-column layout */
+.report-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 22px;
+}
+
+.report-column {
+  min-width: 0;
+}
+
+.report-column .report-section {
+  margin-bottom: 18px;
+}
+
+.report-result {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin: 0 0 22px;
+}
+
+.report-result-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 7px 0;
+}
+
+.report-result-row + .report-result-row {
+  border-top: 1px solid var(--line);
+}
+
+.report-result-row span {
+  color: var(--muted);
+}
+
+.report-result-row strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.report-result-row.total span,
+.report-result-row.total strong {
+  color: #111827;
+  font-weight: 700;
+}
+
+.report-result-row.negative strong {
+  color: #b42318;
+}
+
+.report-result-row.positive strong {
+  color: #176b45;
+}
+
+/* Journal: prioritize whole-row visibility, truncate long text */
+.journal-table-wrap {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow-x: auto;
+}
+
+.journal-table {
+  width: 100%;
+  min-width: 1080px;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.journal-table th,
+.journal-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 8px 7px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.journal-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f3f4f6;
+  font-weight: 650;
+}
+
+.journal-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.journal-table .col-date { width: 92px; }
+.journal-table .col-voucher { width: 68px; }
+.journal-table .col-account { width: 110px; }
+.journal-table .col-subaccount { width: 120px; }
+.journal-table .col-amount { width: 92px; }
+.journal-table .col-description { width: auto; }
+.journal-table .col-receipt { width: 55px; }
+.journal-table .col-status { width: 72px; }
+
+@media (max-width: 1000px) {
+  .report-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .journal-table {
+    min-width: 960px;
+  }
+}
+
+@media (max-width: 800px) {
+  .content-page {
+    max-width: none;
+  }
+
+  .report-result-row strong {
+    font-size: 16px;
+  }
+}
