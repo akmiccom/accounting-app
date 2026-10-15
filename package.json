@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "bank:sync:gmo": "node --env-file=.env.local scripts/sync-gmo-bank.mjs"
+    "bank:sync:gmo": "node --env-file=.env.local scripts/sync-gmo-bank.mjs",
+    "bank:preview:gmo": "node --env-file=.env.local scripts/sync-gmo-bank.mjs --preview"
   },
   "dependencies": {
     "next": "latest",
