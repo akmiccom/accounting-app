@@ -717,23 +717,19 @@ try {
       let updated = 0;
 
       for (const item of classified) {
+        if (item.action === "insert" || item.action === "update_draft") {
+          item.journal.sourceData = {
+            ...item.journal.sourceData,
+            import_file_id: importFileId,
+            import_file_sha256: fileSha,
+          };
+        }
+
         if (item.action === "insert") {
-          const id = await insertJournal(tx, companyId, item);
-          await tx`
-            update accounting.journals
-            set source_data = coalesce(source_data,'{}'::jsonb)
-              || ${tx.json({ import_file_id: importFileId, import_file_sha256: fileSha })}
-            where id=${id}
-          `;
+          await insertJournal(tx, companyId, item);
           inserted += 1;
         } else if (item.action === "update_draft") {
-          const id = await updateDraftJournal(tx, item);
-          await tx`
-            update accounting.journals
-            set source_data = coalesce(source_data,'{}'::jsonb)
-              || ${tx.json({ import_file_id: importFileId, import_file_sha256: fileSha })}
-            where id=${id}
-          `;
+          await updateDraftJournal(tx, item);
           updated += 1;
         }
       }
