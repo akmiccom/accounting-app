@@ -48,6 +48,10 @@ async function getReceipts(companyId) {
       r.amount,
       r.source_system
     from accounting.receipts r
+    join accounting.fiscal_years fy
+      on fy.company_id=r.company_id
+     and r.transaction_date between fy.start_date and fy.end_date
+     and fy.is_closed=false
     where r.company_id=${companyId}
       and r.transaction_date is not null
       and r.amount is not null
