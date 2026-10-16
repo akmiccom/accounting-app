@@ -17,7 +17,9 @@
     "journal:preview:mf:csv": "node --env-file=.env.local scripts/import-moneyforward-journals-csv.mjs --preview",
     "journal:import:mf:csv": "node --env-file=.env.local scripts/import-moneyforward-journals-csv.mjs",
     "reconcile:preview": "node --env-file=.env.local scripts/reconcile-transactions.mjs --preview",
-    "reconcile:run": "node --env-file=.env.local scripts/reconcile-transactions.mjs"
+    "reconcile:run": "node --env-file=.env.local scripts/reconcile-transactions.mjs",
+    "receipt:reconcile:preview": "node --env-file=.env.local scripts/reconcile-receipts.mjs --preview",
+    "receipt:reconcile:run": "node --env-file=.env.local scripts/reconcile-receipts.mjs"
   },
   "dependencies": {
     "next": "latest",
