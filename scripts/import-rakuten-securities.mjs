@@ -379,12 +379,17 @@ async function write(entries) {
       const debit = e.lines.filter(([side]) => side === "debit").reduce((s, x) => s + x[3], 0);
       const credit = e.lines.filter(([side]) => side === "credit").reduce((s, x) => s + x[3], 0);
       if (debit !== credit) throw new Error(`Unbalanced: ${e.voucherNo} debit=${debit} credit=${credit}`);
-      const j = await tx`insert into accounting.journals(company_id,fiscal_year_id,entry_date,voucher_no,description,status,total_debit,total_credit,source_system,source_record_id,source_data,entry_kind) values(${company},${fy},${e.entryDate},${e.voucherNo},${e.description},'posted',${debit},${credit},${SOURCE_SYSTEM},${e.sourceRecordId},${tx.json(e.sourceData)},'regular') returning id`;
+      const j = await tx`insert into accounting.journals(company_id,fiscal_year_id,entry_date,voucher_no,description,status,total_debit,total_credit,source_system,source_record_id,source_data,entry_kind) values(${company},${fy},${e.entryDate},${e.voucherNo},${e.description},'draft',0,0,${SOURCE_SYSTEM},${e.sourceRecordId},${tx.json(e.sourceData)},'regular') returning id`;
       for (let i = 0; i < e.lines.length; i += 1) {
         const [side, a, s, amount, memo] = e.lines[i];
         const ids = await resolve(a, s);
         await tx`insert into accounting.journal_lines(journal_id,line_no,account_id,sub_account_id,side,amount,memo,partner_name) values(${j[0].id},${i + 1},${ids.accountId},${ids.subAccountId},${side},${amount},${memo},'楽天証券')`;
       }
+      await tx`
+        update accounting.journals
+        set status='posted'
+        where id=${j[0].id}
+      `;
       inserted += 1;
     }
     return { inserted, duplicates };
