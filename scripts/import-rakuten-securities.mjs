@@ -167,6 +167,191 @@ async function master(tx, company, accountName, subName, createSub = false) {
   return { accountId: a[0].id, subAccountId: s[0].id };
 }
 
+async function preflight(entries) {
+  const company = await companyId(sql);
+
+  const fiscalYears = new Map();
+  const accountCache = new Map();
+  const subCache = new Map();
+  const missingAccounts = [];
+  const missingSubAccounts = [];
+  const wouldCreateSubAccounts = [];
+  const unbalanced = [];
+  let duplicates = 0;
+  let voucherConflicts = 0;
+
+  const accountFor = async (accountName) => {
+    if (accountCache.has(accountName)) return accountCache.get(accountName);
+    const rows = await sql`
+      select id,name
+      from accounting.accounts
+      where company_id=${company}
+        and name=${accountName}
+        and is_active=true
+    `;
+    const value = rows.length === 1 ? rows[0] : null;
+    if (!value) {
+      missingAccounts.push({ accountName, matches: rows.length });
+    }
+    accountCache.set(accountName, value);
+    return value;
+  };
+
+  const subFor = async (accountName, subName) => {
+    const key = `${accountName}/${subName}`;
+    if (subCache.has(key)) return subCache.get(key);
+
+    const account = await accountFor(accountName);
+    if (!account) {
+      subCache.set(key, null);
+      return null;
+    }
+
+    const rows = await sql`
+      select id,name
+      from accounting.sub_accounts
+      where company_id=${company}
+        and account_id=${account.id}
+        and name=${subName}
+        and is_active=true
+    `;
+
+    if (rows.length === 1) {
+      subCache.set(key, rows[0]);
+      return rows[0];
+    }
+
+    if (rows.length === 0 && accountName === "仮払金") {
+      wouldCreateSubAccounts.push({ accountName, subName });
+      subCache.set(key, { id: null, name: subName, wouldCreate: true });
+      return subCache.get(key);
+    }
+
+    missingSubAccounts.push({ accountName, subName, matches: rows.length });
+    subCache.set(key, null);
+    return null;
+  };
+
+  for (const e of entries) {
+    const fyRows = await sql`
+      select id,name,is_closed,start_date,end_date
+      from accounting.fiscal_years
+      where company_id=${company}
+        and ${e.entryDate}::date between start_date and end_date
+    `;
+    if (fyRows.length !== 1) {
+      throw new Error(`Fiscal year not uniquely found for ${e.entryDate}: matches=${fyRows.length}`);
+    }
+    const fy = fyRows[0];
+    const fyKey = String(fy.id);
+    fiscalYears.set(fyKey, {
+      id: fy.id,
+      name: fy.name,
+      isClosed: fy.is_closed,
+      startDate: String(fy.start_date).slice(0, 10),
+      endDate: String(fy.end_date).slice(0, 10),
+    });
+
+    const debit = e.lines.filter(([side]) => side === "debit").reduce((s, x) => s + x[3], 0);
+    const credit = e.lines.filter(([side]) => side === "credit").reduce((s, x) => s + x[3], 0);
+    if (debit !== credit) {
+      unbalanced.push({ voucherNo: e.voucherNo, debit, credit });
+    }
+
+    const dup = await sql`
+      select id
+      from accounting.journals
+      where company_id=${company}
+        and source_system=${SOURCE_SYSTEM}
+        and source_record_id=${e.sourceRecordId}
+      limit 1
+    `;
+    if (dup.length) duplicates += 1;
+
+    const voucher = await sql`
+      select id,source_system,source_record_id
+      from accounting.journals
+      where company_id=${company}
+        and fiscal_year_id=${fy.id}
+        and voucher_no=${e.voucherNo}
+      limit 1
+    `;
+    if (voucher.length && !dup.length) voucherConflicts += 1;
+
+    for (const [, accountName, subName] of e.lines) {
+      await subFor(accountName, subName);
+    }
+  }
+
+  return {
+    companyId: company,
+    fiscalYears: [...fiscalYears.values()],
+    entries: entries.length,
+    newEntries: entries.length - duplicates,
+    duplicates,
+    voucherConflicts,
+    missingAccounts,
+    missingSubAccounts,
+    wouldCreateSubAccounts: [
+      ...new Map(wouldCreateSubAccounts.map((x) => [`${x.accountName}/${x.subName}`, x])).values(),
+    ],
+    unbalanced,
+  };
+}
+
+function printPreflight(result) {
+  console.log("\n=== DB PREFLIGHT ===");
+  console.log(`entries=${result.entries}`);
+  console.log(`new=${result.newEntries}`);
+  console.log(`duplicates=${result.duplicates}`);
+  console.log(`voucher_conflicts=${result.voucherConflicts}`);
+  console.log(`missing_accounts=${result.missingAccounts.length}`);
+  console.log(`missing_sub_accounts=${result.missingSubAccounts.length}`);
+  console.log(`unbalanced=${result.unbalanced.length}`);
+
+  for (const fy of result.fiscalYears) {
+    console.log(
+      `fiscal_year=${fy.name} ${fy.startDate}..${fy.endDate} status=${fy.isClosed ? "closed" : "open"}`
+    );
+  }
+
+  if (result.wouldCreateSubAccounts.length) {
+    console.log("would_create_sub_accounts:");
+    for (const x of result.wouldCreateSubAccounts) {
+      console.log(`  ${x.accountName}/${x.subName}`);
+    }
+  }
+  if (result.missingAccounts.length) {
+    console.log("missing_accounts_detail:");
+    for (const x of result.missingAccounts) {
+      console.log(`  ${x.accountName} matches=${x.matches}`);
+    }
+  }
+  if (result.missingSubAccounts.length) {
+    console.log("missing_sub_accounts_detail:");
+    for (const x of result.missingSubAccounts) {
+      console.log(`  ${x.accountName}/${x.subName} matches=${x.matches}`);
+    }
+  }
+  if (result.unbalanced.length) {
+    console.log("unbalanced_detail:");
+    for (const x of result.unbalanced) {
+      console.log(`  ${x.voucherNo} debit=${x.debit} credit=${x.credit}`);
+    }
+  }
+
+  const closed = result.fiscalYears.filter((fy) => fy.isClosed);
+  const ok =
+    !closed.length &&
+    result.voucherConflicts === 0 &&
+    result.missingAccounts.length === 0 &&
+    result.missingSubAccounts.length === 0 &&
+    result.unbalanced.length === 0;
+
+  console.log(`preflight=${ok ? "OK" : "NG"}`);
+  return ok;
+}
+
 async function write(entries) {
   return sql.begin(async (tx) => {
     const company = await companyId(tx);
@@ -206,6 +391,16 @@ for (const e of entries) {
 }
 console.log(`\nentries=${entries.length}, trades=${entries.filter((e) => e.sourceData.type === "us_trade").length}, dividends=${entries.filter((e) => e.sourceData.type === "us_dividend").length}`);
 
-if (preview) console.log("Preview mode: database write skipped.");
-else console.log(await write(entries));
+const preflightResult = await preflight(entries);
+const preflightOk = printPreflight(preflightResult);
+
+if (preview) {
+  console.log("Preview mode: database write skipped.");
+  if (!preflightOk) process.exitCode = 2;
+} else {
+  if (!preflightOk) {
+    throw new Error("Preflight failed. Database write aborted.");
+  }
+  console.log(await write(entries));
+}
 await sql.end();
