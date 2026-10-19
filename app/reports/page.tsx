@@ -136,51 +136,95 @@ function ReportSection({
 export default async function ReportsPage({ searchParams }: Props) {
   const p = await searchParams;
   const type = p.type === "bs" ? "bs" : "pl";
+  const scope = p.scope === "monthly" ? "monthly" : "annual";
   const monthRaw = typeof p.month === "string" ? Number(p.month) : 11;
   const month = Number.isInteger(monthRaw) && monthRaw >= 1 && monthRaw <= 12 ? monthRaw : 11;
 
-  const rows = (type === "pl"
-    ? await sql`
-        select
-          "勘定科目名" as account_name,
-          "科目区分" as category,
-          "集計レベル" as level,
-          "補助科目名" as sub_name,
-          "通常金額" as amount,
-          "決算整理金額" as adjusted,
-          "対象月開始日"::text as period_start,
-          "対象月終了日"::text as period_end
-        from accounting.monthly_profit_loss_readable_v
-        where "会計年度" = '2025年度' and "期内月番号" = ${month}
-        order by
-          case "科目区分" when '収益' then 0 when '費用' then 1 else 2 end,
-          "勘定科目名",
-          case when "集計レベル" = '勘定科目' then 0 else 1 end,
-          "補助科目名" nulls first
-      `
-    : await sql`
-        select
-          "勘定科目名" as account_name,
-          "科目区分" as category,
-          "集計レベル" as level,
-          "補助科目名" as sub_name,
-          "通常残高" as amount,
-          "決算整理後残高" as adjusted,
-          "対象月開始日"::text as period_start,
-          "対象月終了日"::text as period_end
-        from accounting.monthly_balance_sheet_readable_v
-        where "会計年度" = '2025年度' and "期内月番号" = ${month}
-        order by
-          case "科目区分" when '資産' then 0 when '負債' then 1 when '純資産' then 2 else 3 end,
-          "勘定科目名",
-          case when "集計レベル" = '勘定科目' then 0 else 1 end,
-          "補助科目名" nulls first
-      `) as ReportRow[];
+  const rows = (scope === "annual"
+    ? type === "pl"
+      ? await sql`
+          select
+            "勘定科目名" as account_name,
+            "科目区分" as category,
+            "集計レベル" as level,
+            "補助科目名" as sub_name,
+            "年間金額" as amount,
+            null::numeric as adjusted,
+            "期首日"::text as period_start,
+            "期末日"::text as period_end
+          from accounting.annual_profit_loss_readable_v
+          where "会計年度" = '2025年度'
+          order by
+            case "科目区分" when '収益' then 0 when '費用' then 1 else 2 end,
+            "勘定科目名",
+            case when "集計レベル" = '勘定科目' then 0 else 1 end,
+            "補助科目名" nulls first
+        `
+      : await sql`
+          select
+            "勘定科目名" as account_name,
+            "科目区分" as category,
+            "集計レベル" as level,
+            "補助科目名" as sub_name,
+            "期末残高" as amount,
+            null::numeric as adjusted,
+            "期首日"::text as period_start,
+            "期末日"::text as period_end
+          from accounting.annual_balance_sheet_readable_v
+          where "会計年度" = '2025年度'
+          order by
+            case "科目区分" when '資産' then 0 when '負債' then 1 when '純資産' then 2 else 3 end,
+            "勘定科目名",
+            case when "集計レベル" = '勘定科目' then 0 else 1 end,
+            "補助科目名" nulls first
+        `
+    : type === "pl"
+      ? await sql`
+          select
+            "勘定科目名" as account_name,
+            "科目区分" as category,
+            "集計レベル" as level,
+            "補助科目名" as sub_name,
+            "通常金額" as amount,
+            "決算整理金額" as adjusted,
+            "対象月開始日"::text as period_start,
+            "対象月終了日"::text as period_end
+          from accounting.monthly_profit_loss_readable_v
+          where "会計年度" = '2025年度' and "期内月番号" = ${month}
+          order by
+            case "科目区分" when '収益' then 0 when '費用' then 1 else 2 end,
+            "勘定科目名",
+            case when "集計レベル" = '勘定科目' then 0 else 1 end,
+            "補助科目名" nulls first
+        `
+      : await sql`
+          select
+            "勘定科目名" as account_name,
+            "科目区分" as category,
+            "集計レベル" as level,
+            "補助科目名" as sub_name,
+            "通常残高" as amount,
+            "決算整理後残高" as adjusted,
+            "対象月開始日"::text as period_start,
+            "対象月終了日"::text as period_end
+          from accounting.monthly_balance_sheet_readable_v
+          where "会計年度" = '2025年度' and "期内月番号" = ${month}
+          order by
+            case "科目区分" when '資産' then 0 when '負債' then 1 when '純資産' then 2 else 3 end,
+            "勘定科目名",
+            case when "集計レベル" = '勘定科目' then 0 else 1 end,
+            "補助科目名" nulls first
+        `) as ReportRow[];
 
   const groups = groupRows(rows);
   const periodStart = rows[0]?.period_start ?? "";
   const periodEnd = rows[0]?.period_end ?? "";
-  const periodLabel = periodStart ? `${periodStart.slice(0, 7).replace("-", "年")}月` : `${month}月目`;
+  const periodLabel =
+    scope === "annual"
+      ? "2025年度"
+      : periodStart
+        ? `${periodStart.slice(0, 7).replace("-", "年")}月`
+        : `${month}月目`;
 
   const revenue = groups.filter((g) => g.category === "収益");
   const expenses = groups.filter((g) => g.category === "費用");
@@ -210,12 +254,19 @@ export default async function ReportsPage({ searchParams }: Props) {
       </div>
 
       <div className="tabs compact-tabs">
-        <Link className={type === "pl" ? "active" : ""} href={`/reports?type=pl&month=${month}`}>PL</Link>
-        <Link className={type === "bs" ? "active" : ""} href={`/reports?type=bs&month=${month}`}>BS</Link>
+        <Link className={type === "pl" ? "active" : ""} href={`/reports?type=pl&scope=${scope}&month=${month}`}>PL</Link>
+        <Link className={type === "bs" ? "active" : ""} href={`/reports?type=bs&scope=${scope}&month=${month}`}>BS</Link>
       </div>
 
       <form className="toolbar report-toolbar">
         <input type="hidden" name="type" value={type} />
+        <label>
+          表示範囲
+          <select name="scope" defaultValue={scope}>
+            <option value="annual">年度全体</option>
+            <option value="monthly">月別</option>
+          </select>
+        </label>
         <label>
           対象月
           <select name="month" defaultValue={month}>
