@@ -244,12 +244,22 @@ async function preflight(entries) {
     }
     const fy = fyRows[0];
     const fyKey = String(fy.id);
+    const toIsoDate = (value) => {
+      if (value instanceof Date) return value.toISOString().slice(0, 10);
+      const text = String(value ?? "");
+      const iso = text.match(/^(\\d{4}-\\d{2}-\\d{2})/);
+      if (iso) return iso[1];
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+      return text;
+    };
+
     fiscalYears.set(fyKey, {
       id: fy.id,
       name: fy.name,
       isClosed: fy.is_closed,
-      startDate: String(fy.start_date).slice(0, 10),
-      endDate: String(fy.end_date).slice(0, 10),
+      startDate: toIsoDate(fy.start_date),
+      endDate: toIsoDate(fy.end_date),
     });
 
     const debit = e.lines.filter(([side]) => side === "debit").reduce((s, x) => s + x[3], 0);
