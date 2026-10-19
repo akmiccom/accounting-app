@@ -12,8 +12,14 @@ const flag = (name) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : null;
 };
-const tradePath = flag("--trades");
-const dividendPath = flag("--dividends");
+const positional = args.filter((value, index) => {
+  if (value.startsWith("--")) return false;
+  const prev = args[index - 1];
+  if (prev === "--trades" || prev === "--dividends") return false;
+  return true;
+});
+const tradePath = flag("--trades") || positional[0] || null;
+const dividendPath = flag("--dividends") || positional[1] || null;
 const preview = args.includes("--preview") || args.includes("--dry-run");
 if (!tradePath && !dividendPath) throw new Error("--trades and/or --dividends is required");
 
@@ -155,7 +161,7 @@ async function master(tx, company, accountName, subName, createSub = false) {
   if (a.length !== 1) throw new Error(`Account not uniquely found: ${accountName}`);
   let s = await tx`select id from accounting.sub_accounts where company_id=${company} and account_id=${a[0].id} and name=${subName} and is_active=true`;
   if (!s.length && createSub) {
-    s = await tx`insert into accounting.sub_accounts(company_id,account_id,name,source_system,source_record_id) values(${company},${a[0].id},${subName},${SOURCE_SYSTEM},${`bootstrap:${subName}d}) returning id`;
+    s = await tx`insert into accounting.sub_accounts(company_id,account_id,name,source_system,source_record_id) values(${company},${a[0].id},${subName},${SOURCE_SYSTEM},${`bootstrap:${subName}`}) returning id`;
   }
   if (s.length !== 1) throw new Error(`Sub-account not uniquely found: ${accountName}/${subName}`);
   return { accountId: a[0].id, subAccountId: s[0].id };
