@@ -120,4 +120,4 @@
 - 紙書類をスキャナ保存として扱う場合は、別途要件を満たす。
 - 制度改正があり得るため、本番運用開始前と年度切替時に国税庁の最新要件を確認する。
 
-詳細は [electronic-bookkeeping.md](electronic-bookkeeping.md) を参照する。
+詳細は [電子帳簿保存法を意識した証憑管理](../operations/electronic-bookkeeping.md) を参照する。

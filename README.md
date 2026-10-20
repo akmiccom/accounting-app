@@ -343,17 +343,20 @@ npm run bank:sync:gmo -- --from=2026-10-01 --to=2026-10-15 --preview
 
 ## ドキュメント
 
-- [要件・スコープ](docs/requirements.md)
-- [アーキテクチャ](docs/architecture.md)
-- [データモデル](docs/data-model.md)
-- [DDL草案](docs/ddl.md)
-- [DDL SQL](docs/ddl.sql)
-- [MFクラウド移行計画](docs/mf-migration.md)
-- [電子帳簿保存法を意識した証憑管理](docs/electronic-bookkeeping.md)
-- [API概要](docs/api-overview.md)
-- [API詳細設計](docs/api-detail.md)
-- [画面構成案](docs/ui-structure.md)
-- [運用ルール](docs/operations.md)
+- [ドキュメント一覧](docs/README.md)
+- [要件・スコープ](docs/product/requirements.md)
+- [アーキテクチャ](docs/architecture/architecture.md)
+- [データモデル](docs/architecture/data-model.md)
+- [DDL草案](docs/architecture/ddl.md)
+- [DDL SQL](docs/architecture/ddl.sql)
+- [MFクラウド移行計画](docs/migration/mf-migration.md)
+- [電子帳簿保存法を意識した証憑管理](docs/operations/electronic-bookkeeping.md)
+- [API概要](docs/api/api-overview.md)
+- [API詳細設計](docs/api/api-detail.md)
+- [画面構成案](docs/product/ui-structure.md)
+- [運用ルール](docs/operations/operations.md)
+- [楽天証券CSV取込](docs/integrations/rakuten-securities-import.md)
+- [楽天証券 VTI 配当金の会計処理方針](docs/accounting/rakuten-dividend-policy.md)
 
 ## 実装状況
 
