@@ -9,6 +9,7 @@ export const metadata = {
 const nav = [
   ["/", "ダッシュボード"],
   ["/journals", "仕訳帳"],
+  ["/trial-balance", "残高試算表"],
   ["/reports", "PL / BS"],
   ["/reconciliation", "照合一覧"],
 ] as const;
