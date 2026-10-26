@@ -21,7 +21,9 @@
     "receipt:reconcile:preview": "node --env-file=.env.local scripts/reconcile-receipts.mjs --preview",
     "receipt:reconcile:run": "node --env-file=.env.local scripts/reconcile-receipts.mjs",
     "journal:preview:rakuten:csv": "node --env-file=.env.local scripts/import-rakuten-securities.mjs --preview",
-    "journal:import:rakuten:csv": "node --env-file=.env.local scripts/import-rakuten-securities.mjs"
+    "journal:import:rakuten:csv": "node --env-file=.env.local scripts/import-rakuten-securities.mjs",
+    "receipt:sync:drive": "node --env-file=.env.local scripts/sync-drive-receipts.mjs",
+    "receipt:sync:drive:preview": "node --env-file=.env.local scripts/sync-drive-receipts.mjs --preview"
   },
   "dependencies": {
     "next": "latest",
