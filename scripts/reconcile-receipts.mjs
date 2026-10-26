@@ -16,7 +16,22 @@ function normalizeText(value) {
     .trim();
 }
 
+function arg(name) {
+  const prefix = `--${name}=`;
+  const hit = process.argv.find((value) => value.startsWith(prefix));
+  return hit ? hit.slice(prefix.length) : null;
+}
+
+function checkDate(value, name) {
+  if (value && !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) {
+    throw new Error(`--${name} must be YYYY-MM-DD`);
+  }
+  return value;
+}
+
 const preview = process.argv.includes("--preview") || process.argv.includes("--dry-run");
+const from = checkDate(arg("from"), "from");
+const to = checkDate(arg("to"), "to");
 const databaseUrl = requiredEnv("DATABASE_URL");
 const companyName = process.env.ACCOUNTING_COMPANY_NAME?.trim() || "akmic合同会社";
 
@@ -55,6 +70,8 @@ async function getReceipts(companyId) {
     where r.company_id=${companyId}
       and r.transaction_date is not null
       and r.amount is not null
+      and (${from}::date is null or r.transaction_date >= ${from}::date)
+      and (${to}::date is null or r.transaction_date <= ${to}::date)
       and not exists (
         select 1
         from accounting.journal_receipts jr
@@ -88,8 +105,10 @@ async function getJournalCandidates(companyId, receipt) {
     order by j.voucher_no,j.id
   `;
 
+  if (rows.length === 1) return rows;
+
   const supplier = normalizeText(receipt.supplier_name);
-  if (!supplier) return rows.length === 1 ? rows : [];
+  if (!supplier) return [];
 
   const textMatches = rows.filter((row) => {
     const description = normalizeText(row.description);
