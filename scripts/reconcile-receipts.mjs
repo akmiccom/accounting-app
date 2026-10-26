@@ -23,7 +23,7 @@ function arg(name) {
 }
 
 function checkDate(value, name) {
-  if (value && !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) {
+  if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new Error(`--${name} must be YYYY-MM-DD`);
   }
   return value;
