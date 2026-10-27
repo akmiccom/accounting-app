@@ -112,7 +112,7 @@ FY2025対象GMOあおぞらネット銀行明細は39件。
 MFクラウド（2025年度の基準）
 GMOあおぞらネット銀行 CSV
 法人カード CSV
-Google Drive / AI証憑入力
+Google Drive Inbox（紙レシート / Webインボイス）
         |
         v
 会計専用 Supabase Project
@@ -245,6 +245,38 @@ npm run receipt:reconcile:run
 
 FY2025の既存証憑218件はすべてリンク済みのため、現在このコマンドは主に今後追加する領収書向け。
 
+### 5.1 領収書Inboxの新運用方針
+
+`01_領収書受付` には紙レシートとWebインボイスを混在させてよい。
+
+処理はコード優先・AI最小化とする。
+
+```text
+Google Drive Inbox
+    ↓
+SHA-256重複チェック
+    ↓
+分類
+    ├─ 紙レシート → AI解析
+    └─ テキストPDF → コード解析
+                       └─ 失敗時だけAI
+    ↓
+Supabase Storage
+    ↓
+accounting.receipts
+    ↓
+reconcile-receipts
+    ↓
+journal_receipts
+```
+
+証憑取込時には仕訳を新規作成しない。対応する仕訳がまだない場合は `receipts` に保持し、後から再照合する。
+
+既存の `sync-drive-receipts.mjs` は、すでに生成済みのJSONを取り込む互換ルートとして残す。
+今後の共通Inbox処理は `process-receipt-inbox.mjs` を中心に段階的に実装する。
+
+詳細: [領収書Inbox処理パイプライン](docs/operations/receipt-inbox-pipeline.md)
+
 ### 6. MFを使わないFY2026以降の仕訳候補
 
 銀行・カード明細から自前仕訳候補を作成する場合:
@@ -362,6 +394,7 @@ npm run bank:sync:gmo -- --from=2026-10-01 --to=2026-10-15 --preview
 - [DDL SQL](docs/architecture/ddl.sql)
 - [MFクラウド移行計画](docs/migration/mf-migration.md)
 - [電子帳簿保存法を意識した証憑管理](docs/operations/electronic-bookkeeping.md)
+- [領収書Inbox処理パイプライン](docs/operations/receipt-inbox-pipeline.md)
 - [API概要](docs/api/api-overview.md)
 - [API詳細設計](docs/api/api-detail.md)
 - [画面構成案](docs/product/ui-structure.md)
@@ -389,6 +422,8 @@ npm run bank:sync:gmo -- --from=2026-10-01 --to=2026-10-15 --preview
 - [ ] FY2025年度末MF仕訳の最終取込（10/15～10/31）
 - [ ] FY2025カード・銀行最終再照合
 - [ ] Storage原本保存の未完了分補完
+- [ ] 領収書Inbox分類preview（紙=AI / Web PDF=コード優先）
+- [ ] 領収書Inbox → Storage → receipts直接登録
 - [ ] Google Sheets確認・集計画面
 - [ ] FY2025最終帳票照合
 - [ ] 最終バックアップ・復元確認
