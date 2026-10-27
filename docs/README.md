@@ -31,6 +31,7 @@
 
 - [運用ルール](operations/operations.md)
 - [電子帳簿保存法を意識した証憑管理](operations/electronic-bookkeeping.md)
+- [領収書Inbox処理パイプライン](operations/receipt-inbox-pipeline.md)
 
 ## migration
 
