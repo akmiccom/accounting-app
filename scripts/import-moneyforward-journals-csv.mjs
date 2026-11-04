@@ -511,6 +511,79 @@ function economicFingerprint(date, lines) {
   });
 }
 
+// Source vouchers are not shared between MF and source-data importers.
+// Cross-source matching is restricted to already posted, curated imports;
+// these are preferred over MF during migration, never overwritten.
+async function findCrossSourceMatch(sql, companyId, fiscalYearId, journal) {
+  const candidates = await sql`
+    select id,entry_date,voucher_no,description,source_system,total_debit,total_credit
+    from accounting.journals
+    where company_id=${companyId}
+      and fiscal_year_id=${fiscalYearId}
+      and entry_date=${journal.entryDate}
+      and status='posted'
+      and source_system in ('rakuten_securities','prior_period_correction')
+      and total_debit=${journal.totalDebit}
+      and total_credit=${journal.totalCredit}
+  `;
+  const sameContent = [];
+  const possibleContent = [];
+  for (const candidate of candidates) {
+    const lines = await sql`
+      select jl.side,jl.amount,a.name account_name,sa.name sub_account_name
+      from accounting.journal_lines jl
+      join accounting.accounts a on a.id=jl.account_id
+      left join accounting.sub_accounts sa on sa.id=jl.sub_account_id
+      where jl.journal_id=${candidate.id}
+    `;
+    const exact = economicFingerprint(candidate.entry_date, lines) ===
+      economicFingerprint(journal.entryDate, journal.lines) &&
+      canonicalText(candidate.description) === canonicalText(journal.description);
+    // A matching dated amount with a different detail is suspicious, not a duplicate.
+    // The user must resolve it; do not guess away differences in subaccounts.
+    (exact ? sameContent : possibleContent).push(candidate);
+  }
+  if (sameContent.length === 1 && possibleContent.length === 0) {
+    return { kind: "duplicate_cross_source", match: sameContent[0] };
+  }
+  if (sameContent.length || possibleContent.length) {
+    return { kind: "possible_cross_source_duplicate",
+      matches: [...sameContent, ...possibleContent] };
+  }
+  return null;
+}
+
+// A previously imported MF voucher can itself be reversed after a verified
+// cross-source duplicate was found. An explicit audit entry is required;
+// an arbitrary reversed voucher must never be silently ignored.
+async function auditedCrossSourceReversal(sql, companyId, fiscalYearId, existing, incoming) {
+  const audits = await sql`
+    select after_data->>'preserved_source_voucher' as preferred_voucher
+    from accounting.audit_logs
+    where target_type='journal'
+      and target_id=${existing.id}
+      and action='reverse_duplicate_mf_import'
+    order by created_at desc
+    limit 1
+  `;
+  if (audits.length !== 1 || !audits[0].preferred_voucher) return null;
+  if (economicFingerprint(existing.entry_date, existing.lines) !==
+      economicFingerprint(incoming.entryDate, incoming.lines)) return null;
+
+  const matches = await sql`
+    select id,voucher_no,entry_date,total_debit,total_credit,source_system
+    from accounting.journals
+    where company_id=${companyId} and fiscal_year_id=${fiscalYearId}
+      and voucher_no=${audits[0].preferred_voucher}
+      and status='posted'
+      and source_system in ('rakuten_securities','prior_period_correction')
+  `;
+  if (matches.length !== 1 || isoDate(matches[0].entry_date) !== incoming.entryDate ||
+      Number(matches[0].total_debit) !== Number(incoming.totalDebit) ||
+      Number(matches[0].total_credit) !== Number(incoming.totalCredit)) return null;
+  return matches[0];
+}
+
 function sameJournalExceptKind(existing, incoming) {
   return isoDate(existing.entry_date) === incoming.entryDate &&
     String(existing.voucher_no) === String(incoming.voucherNo) &&
@@ -552,7 +625,19 @@ async function classify(sql, companyId, master, journals) {
       );
 
       if (!existing) {
-        result.push({ action: "insert", journal: resolved });
+        const crossSource = await findCrossSourceMatch(
+          sql, companyId, fiscalYearId, resolved
+        );
+        if (crossSource?.kind === "duplicate_cross_source") {
+          result.push({ action: "duplicate_cross_source", journal: resolved,
+            reason: `Existing ${crossSource.match.source_system} voucher ${crossSource.match.voucher_no}` });
+        } else if (crossSource) {
+          result.push({ action: "possible_cross_source_duplicate", journal: resolved,
+            reason: `Review candidates: ${crossSource.matches.map((m) =>
+              `${m.source_system}/${m.voucher_no}`).join(", ")}` });
+        } else {
+          result.push({ action: "insert", journal: resolved });
+        }
         continue;
       }
 
@@ -568,10 +653,18 @@ async function classify(sql, companyId, master, journals) {
           result.push({ action: "duplicate_corrected", journal: resolved, existing,
             replacement, reason: `Matched posted correction ${replacement.voucher_no}` });
         } else {
-          result.push({ action: "conflict", journal: resolved, existing,
-            reason: `Reversed journal differs or has ${count} posted correction(s); manual review required`,
-            debug: { csvFingerprint: journalFingerprint(resolved),
-              dbFingerprint: dbFingerprint(existing) } });
+          const preserved = existing.source_system === JOURNAL_SOURCE
+            ? await auditedCrossSourceReversal(sql, companyId, fiscalYearId, existing, resolved)
+            : null;
+          if (preserved) {
+            result.push({ action: "duplicate_cross_source", journal: resolved, existing,
+              reason: `Previously reversed MF duplicate; kept ${preserved.source_system}/${preserved.voucher_no}` });
+          } else {
+            result.push({ action: "conflict", journal: resolved, existing,
+              reason: `Reversed journal differs or has ${count} posted correction(s); manual review required`,
+              debug: { csvFingerprint: journalFingerprint(resolved),
+                dbFingerprint: dbFingerprint(existing) } });
+          }
         }
       } else if (existing.status === "posted" &&
                  existing.source_system === JOURNAL_SOURCE &&
@@ -729,6 +822,8 @@ try {
     duplicates: classified.filter((x) => x.action === "duplicate").length,
     correctedDuplicates: classified.filter((x) => x.action === "duplicate_corrected").length,
     openingDuplicates: classified.filter((x) => x.action === "duplicate_opening").length,
+    crossSourceDuplicates: classified.filter((x) => x.action === "duplicate_cross_source").length,
+    possibleCrossSourceDuplicates: classified.filter((x) => x.action === "possible_cross_source_duplicate").length,
     conflicts: classified.filter((x) => x.action === "conflict").length,
     errors:
       parseErrors.length + classified.filter((x) => x.action === "error").length,
@@ -758,11 +853,11 @@ try {
 
   if (preview) {
     console.log("Preview mode: database write skipped.");
-    if (summary.errors || summary.conflicts) process.exitCode = 2;
+    if (summary.errors || summary.conflicts || summary.possibleCrossSourceDuplicates) process.exitCode = 2;
   } else {
-    if (summary.errors || summary.conflicts) {
+    if (summary.errors || summary.conflicts || summary.possibleCrossSourceDuplicates) {
       throw new Error(
-        `Import aborted: errors=${summary.errors}, conflicts=${summary.conflicts}. Resolve them or use a corrected CSV first.`
+        `Import aborted: errors=${summary.errors}, conflicts=${summary.conflicts}, possibleCrossSourceDuplicates=${summary.possibleCrossSourceDuplicates}. Resolve them before importing.`
       );
     }
 
@@ -826,7 +921,7 @@ try {
     });
 
     console.log(
-      `journals: inserted=${result.inserted}, updated=${result.updated}, duplicates=${summary.duplicates}, correctedDuplicates=${summary.correctedDuplicates}, openingDuplicates=${summary.openingDuplicates}`
+      `journals: inserted=${result.inserted}, updated=${result.updated}, duplicates=${summary.duplicates}, correctedDuplicates=${summary.correctedDuplicates}, openingDuplicates=${summary.openingDuplicates}, crossSourceDuplicates=${summary.crossSourceDuplicates}`
     );
   }
 } finally {
