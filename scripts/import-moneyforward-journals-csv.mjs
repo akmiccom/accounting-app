@@ -473,6 +473,53 @@ async function existingJournal(sql, companyId, fiscalYearId, voucherNo) {
   };
 }
 
+// Replaced MF journals retain their original voucher number while an audited
+// historical_correction journal carries the current accounting entry. Never
+// infer a replacement by amount/date alone: require an explicit foreign-key link.
+async function postedReplacement(sql, originalId) {
+  const rows = await sql`
+    select id,entry_date,voucher_no,status,entry_kind,source_system
+    from accounting.journals
+    where reversal_of_journal_id=${originalId}
+      and status='posted'
+      and source_system='historical_correction'
+  `;
+  if (rows.length !== 1) return { replacement: null, count: rows.length };
+  const replacement = rows[0];
+  const lines = await sql`
+    select jl.line_no,jl.side,jl.amount,
+           a.name account_name,sa.name sub_account_name
+    from accounting.journal_lines jl
+    join accounting.accounts a on a.id=jl.account_id
+    left join accounting.sub_accounts sa on sa.id=jl.sub_account_id
+    where jl.journal_id=${replacement.id}
+    order by jl.line_no,jl.side
+  `;
+  return { replacement: { ...replacement, lines }, count: 1 };
+}
+
+// A correction may have numbered each debit/credit row separately. Compare
+// economic content, not presentation line numbers or replacement voucher IDs.
+function economicFingerprint(date, lines) {
+  return JSON.stringify({
+    entryDate: isoDate(date),
+    lines: lines.map((line) =>
+      [line.side, canonicalText(line.account_name ?? line.accountName),
+       canonicalText(line.sub_account_name ?? line.subAccountName),
+       Number(line.amount).toFixed(2)].join("|")
+    ).sort(),
+  });
+}
+
+function sameJournalExceptKind(existing, incoming) {
+  return isoDate(existing.entry_date) === incoming.entryDate &&
+    String(existing.voucher_no) === String(incoming.voucherNo) &&
+    economicFingerprint(existing.entry_date, existing.lines) ===
+      economicFingerprint(incoming.entryDate, incoming.lines) &&
+    dbFingerprint(existing).replace(/"entryKind":"[^"]+"/, '"entryKind":"same"') ===
+      journalFingerprint(incoming).replace(/"entryKind":"[^"]+"/, '"entryKind":"same"');
+}
+
 function dbFingerprint(existing) {
   return JSON.stringify({
     entryDate: isoDate(existing.entry_date),
@@ -512,6 +559,27 @@ async function classify(sql, companyId, master, journals) {
       const same = dbFingerprint(existing) === journalFingerprint(resolved);
       if (same) {
         result.push({ action: "duplicate", journal: resolved, existing });
+      } else if (existing.status === "reversed") {
+        const { replacement, count } = await postedReplacement(sql, existing.id);
+        if (replacement &&
+            existing.source_system === JOURNAL_SOURCE &&
+            economicFingerprint(replacement.entry_date, replacement.lines) ===
+              economicFingerprint(resolved.entryDate, resolved.lines)) {
+          result.push({ action: "duplicate_corrected", journal: resolved, existing,
+            replacement, reason: `Matched posted correction ${replacement.voucher_no}` });
+        } else {
+          result.push({ action: "conflict", journal: resolved, existing,
+            reason: `Reversed journal differs or has ${count} posted correction(s); manual review required`,
+            debug: { csvFingerprint: journalFingerprint(resolved),
+              dbFingerprint: dbFingerprint(existing) } });
+        }
+      } else if (existing.status === "posted" &&
+                 existing.source_system === JOURNAL_SOURCE &&
+                 existing.entry_kind === "opening" &&
+                 resolved.entryKind === "regular" &&
+                 sameJournalExceptKind(existing, resolved)) {
+        result.push({ action: "duplicate_opening", journal: resolved, existing,
+          reason: "Same opening balances; preserving DB opening entry_kind" });
       } else if (existing.status === "draft" && existing.source_system === JOURNAL_SOURCE) {
         result.push({ action: "update_draft", journal: resolved, existing });
       } else {
@@ -659,6 +727,8 @@ try {
     inserts: classified.filter((x) => x.action === "insert").length,
     draftUpdates: classified.filter((x) => x.action === "update_draft").length,
     duplicates: classified.filter((x) => x.action === "duplicate").length,
+    correctedDuplicates: classified.filter((x) => x.action === "duplicate_corrected").length,
+    openingDuplicates: classified.filter((x) => x.action === "duplicate_opening").length,
     conflicts: classified.filter((x) => x.action === "conflict").length,
     errors:
       parseErrors.length + classified.filter((x) => x.action === "error").length,
@@ -756,7 +826,7 @@ try {
     });
 
     console.log(
-      `journals: inserted=${result.inserted}, updated=${result.updated}, duplicates=${summary.duplicates}`
+      `journals: inserted=${result.inserted}, updated=${result.updated}, duplicates=${summary.duplicates}, correctedDuplicates=${summary.correctedDuplicates}, openingDuplicates=${summary.openingDuplicates}`
     );
   }
 } finally {
