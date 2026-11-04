@@ -537,7 +537,8 @@ async function findCrossSourceMatch(sql, companyId, fiscalYearId, journal) {
       where jl.journal_id=${candidate.id}
     `;
     const exact = economicFingerprint(candidate.entry_date, lines) ===
-      economicFingerprint(journal.entryDate, journal.lines);
+      economicFingerprint(journal.entryDate, journal.lines) &&
+      canonicalText(candidate.description) === canonicalText(journal.description);
     // A matching dated amount with a different detail is suspicious, not a duplicate.
     // The user must resolve it; do not guess away differences in subaccounts.
     (exact ? sameContent : possibleContent).push(candidate);
