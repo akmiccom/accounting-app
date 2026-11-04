@@ -553,6 +553,37 @@ async function findCrossSourceMatch(sql, companyId, fiscalYearId, journal) {
   return null;
 }
 
+// A previously imported MF voucher can itself be reversed after a verified
+// cross-source duplicate was found. An explicit audit entry is required;
+// an arbitrary reversed voucher must never be silently ignored.
+async function auditedCrossSourceReversal(sql, companyId, fiscalYearId, existing, incoming) {
+  const audits = await sql`
+    select after_data->>'preserved_source_voucher' as preferred_voucher
+    from accounting.audit_logs
+    where target_type='journal'
+      and target_id=${existing.id}
+      and action='reverse_duplicate_mf_import'
+    order by created_at desc
+    limit 1
+  `;
+  if (audits.length !== 1 || !audits[0].preferred_voucher) return null;
+  if (economicFingerprint(existing.entry_date, existing.lines) !==
+      economicFingerprint(incoming.entryDate, incoming.lines)) return null;
+
+  const matches = await sql`
+    select id,voucher_no,entry_date,total_debit,total_credit,source_system
+    from accounting.journals
+    where company_id=${companyId} and fiscal_year_id=${fiscalYearId}
+      and voucher_no=${audits[0].preferred_voucher}
+      and status='posted'
+      and source_system in ('rakuten_securities','prior_period_correction')
+  `;
+  if (matches.length !== 1 || isoDate(matches[0].entry_date) !== incoming.entryDate ||
+      Number(matches[0].total_debit) !== Number(incoming.totalDebit) ||
+      Number(matches[0].total_credit) !== Number(incoming.totalCredit)) return null;
+  return matches[0];
+}
+
 function sameJournalExceptKind(existing, incoming) {
   return isoDate(existing.entry_date) === incoming.entryDate &&
     String(existing.voucher_no) === String(incoming.voucherNo) &&
@@ -622,10 +653,18 @@ async function classify(sql, companyId, master, journals) {
           result.push({ action: "duplicate_corrected", journal: resolved, existing,
             replacement, reason: `Matched posted correction ${replacement.voucher_no}` });
         } else {
-          result.push({ action: "conflict", journal: resolved, existing,
-            reason: `Reversed journal differs or has ${count} posted correction(s); manual review required`,
-            debug: { csvFingerprint: journalFingerprint(resolved),
-              dbFingerprint: dbFingerprint(existing) } });
+          const preserved = existing.source_system === JOURNAL_SOURCE
+            ? await auditedCrossSourceReversal(sql, companyId, fiscalYearId, existing, resolved)
+            : null;
+          if (preserved) {
+            result.push({ action: "duplicate_cross_source", journal: resolved, existing,
+              reason: `Previously reversed MF duplicate; kept ${preserved.source_system}/${preserved.voucher_no}` });
+          } else {
+            result.push({ action: "conflict", journal: resolved, existing,
+              reason: `Reversed journal differs or has ${count} posted correction(s); manual review required`,
+              debug: { csvFingerprint: journalFingerprint(resolved),
+                dbFingerprint: dbFingerprint(existing) } });
+          }
         }
       } else if (existing.status === "posted" &&
                  existing.source_system === JOURNAL_SOURCE &&
