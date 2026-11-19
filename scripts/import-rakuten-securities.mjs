@@ -79,10 +79,13 @@ async function loadTrades(file) {
     }
     if (raw["決済通貨"] !== "円") throw new Error(`Unsupported settlement currency: ${raw["決済通貨"]}`);
     const entryDate = date(raw["約定日"]);
+    const settlementDate = date(raw["受渡日"]);
+    if (settlementDate < entryDate) throw new Error(`Settlement precedes trade date: ${entryDate}/${settlementDate}`);
     const amount = Math.round(num(raw["受渡金額［円］"]));
     const id = sourceId("us_trade", raw);
     return {
       entryDate,
+      settlementDate,
       voucherNo: `RS-T-${entryDate.replaceAll("-", "")}-${short(id)}`,
       description: `${raw["ティッカー"]} / ${raw["銘柄名"]}`,
       sourceRecordId: id,
@@ -278,6 +281,38 @@ async function preflight(entries) {
     `;
     if (dup.length) duplicates += 1;
 
+    // New securities trades whose settlement crosses a fiscal boundary need
+    // a settlement voucher in the receiving fiscal year. Historic imported
+    // trades remain untouched; they are handled by explicit adjustments.
+    if (!dup.length && e.sourceData.type === "us_trade" && e.settlementDate) {
+      const fyEnd = toIsoDate(fy.end_date);
+      const fyStart = toIsoDate(fy.start_date);
+      if (e.settlementDate < fyStart) {
+        throw new Error(`Settlement date outside expected order: ${e.voucherNo}`);
+      }
+      if (e.settlementDate > fyEnd) {
+        const settlementYears = await sql`
+          select id,name,is_closed,start_date,end_date from accounting.fiscal_years
+          where company_id=${company}
+            and ${e.settlementDate}::date between start_date and end_date
+        `;
+        if (settlementYears.length !== 1) throw new Error(`Settlement fiscal year missing: ${e.settlementDate}`);
+        const sy = settlementYears[0];
+        fiscalYears.set(String(sy.id), {
+          id: sy.id, name: sy.name, isClosed: sy.is_closed,
+          startDate: toIsoDate(sy.start_date), endDate: toIsoDate(sy.end_date),
+        });
+        const settleNo = `RS-S-${e.settlementDate.replaceAll("-", "")}-${short(e.sourceRecordId)}`;
+        const colliding = await sql`
+          select id from accounting.journals
+          where company_id=${company} and fiscal_year_id=${sy.id}
+            and voucher_no=${settleNo}
+        `;
+        if (colliding.length) voucherConflicts += 1;
+        await subFor("未払金", "楽天証券 未決済買付");
+      }
+    }
+
     const voucher = await sql`
       select id,source_system,source_record_id
       from accounting.journals
@@ -372,16 +407,25 @@ async function write(entries) {
       return cache.get(key);
     };
     let inserted = 0, duplicates = 0;
+    let settlementsInserted = 0;
     for (const e of entries) {
       const dup = await tx`select id from accounting.journals where company_id=${company} and source_system=${SOURCE_SYSTEM} and source_record_id=${e.sourceRecordId}`;
       if (dup.length) { duplicates += 1; continue; }
       const fy = await fiscalYear(tx, company, e.entryDate);
+      const crossYear = e.sourceData.type === "us_trade" && !!e.settlementDate &&
+        (await tx`select not (${e.settlementDate}::date between start_date and end_date) as crosses
+          from accounting.fiscal_years where id=${fy}`)[0].crosses;
+      const settlementFy = crossYear ? await fiscalYear(tx, company, e.settlementDate) : null;
+      const tradeLines = crossYear ? [
+        e.lines[0],
+        ["credit", "未払金", "楽天証券 未決済買付", e.lines[0][3], "約定日買付代金（受渡前）"],
+      ] : e.lines;
       const debit = e.lines.filter(([side]) => side === "debit").reduce((s, x) => s + x[3], 0);
       const credit = e.lines.filter(([side]) => side === "credit").reduce((s, x) => s + x[3], 0);
       if (debit !== credit) throw new Error(`Unbalanced: ${e.voucherNo} debit=${debit} credit=${credit}`);
       const j = await tx`insert into accounting.journals(company_id,fiscal_year_id,entry_date,voucher_no,description,status,total_debit,total_credit,source_system,source_record_id,source_data,entry_kind) values(${company},${fy},${e.entryDate},${e.voucherNo},${e.description},'draft',0,0,${SOURCE_SYSTEM},${e.sourceRecordId},${tx.json(e.sourceData)},'regular') returning id`;
-      for (let i = 0; i < e.lines.length; i += 1) {
-        const [side, a, s, amount, memo] = e.lines[i];
+      for (let i = 0; i < tradeLines.length; i += 1) {
+        const [side, a, s, amount, memo] = tradeLines[i];
         const ids = await resolve(a, s);
         await tx`insert into accounting.journal_lines(journal_id,line_no,account_id,sub_account_id,side,amount,memo,partner_name) values(${j[0].id},${i + 1},${ids.accountId},${ids.subAccountId},${side},${amount},${memo},'楽天証券')`;
       }
@@ -391,8 +435,44 @@ async function write(entries) {
         where id=${j[0].id}
       `;
       inserted += 1;
+
+      if (crossYear) {
+        const amount = e.lines[0][3];
+        const settleNo = `RS-S-${e.settlementDate.replaceAll("-", "")}-${short(e.sourceRecordId)}`;
+        const settleData = {
+          type: "us_trade_settlement",
+          related_trade_voucher: e.voucherNo,
+          trade_date: e.entryDate,
+          settlement_date: e.settlementDate,
+          trade_source_record_id: e.sourceRecordId,
+        };
+        const settleId = `settlement:${e.sourceRecordId}`;
+        const sj = await tx`
+          insert into accounting.journals(company_id,fiscal_year_id,entry_date,voucher_no,description,status,total_debit,total_credit,source_system,source_record_id,source_data,entry_kind)
+          values(${company},${settlementFy},${e.settlementDate},${settleNo},${e.description + " 受渡"},'draft',0,0,
+            ${SOURCE_SYSTEM},${settleId},${tx.json(settleData)},'regular') returning id
+        `;
+        const payable = await resolve("未払金", "楽天証券 未決済買付");
+        const yen = await resolve("預け金", "楽天証券 預け金(円)");
+        await tx`
+          insert into accounting.journal_lines(journal_id,line_no,account_id,sub_account_id,side,amount,memo,partner_name)
+          values(${sj[0].id},1,${payable.accountId},${payable.subAccountId},'debit',${amount},
+            '約定日未払金の消込','楽天証券')
+        `;
+        await tx`
+          insert into accounting.journal_lines(journal_id,line_no,account_id,sub_account_id,side,amount,memo,partner_name)
+          values(${sj[0].id},1,${yen.accountId},${yen.subAccountId},'credit',${amount},
+            '受渡日 円預け金から決済','楽天証券')
+        `;
+        await tx`
+          update accounting.journals
+          set total_debit=${amount},total_credit=${amount},status='posted'
+          where id=${sj[0].id}
+        `;
+        settlementsInserted += 1;
+      }
     }
-    return { inserted, duplicates };
+    return { inserted, duplicates, settlementsInserted };
   });
 }
 
