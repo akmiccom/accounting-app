@@ -44,7 +44,9 @@ async function cardCandidates(companyId) {
       join accounting.accounts a on a.id=jl.account_id
       left join accounting.sub_accounts sa on sa.id=jl.sub_account_id
       where j.source_system='moneyforward'
-        and coalesce(j.source_data ? 'import_file_id', false)
+        and j.status='posted'
+        -- MoneyForward API journals may not have source_data.import_file_id.
+        -- A missing file reference must not exclude an otherwise valid journal.
         and not exists (
           select 1
           from accounting.card_transactions used_card
